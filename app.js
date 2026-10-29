@@ -1,4 +1,4 @@
-// 85°X - store. Product content is loaded from Supabase.
+// Child Style storefront. Product content is loaded from Supabase.
 // Only published products are visible to public visitors because RLS is enabled.
 let products = [];
 let activeCategory = "全部";
@@ -17,7 +17,7 @@ function shapeFor(category) {
 }
 function placeholder(product) {
   const color = product.placeholderColor || "#202020";
-  return `<div class="product-placeholder ${shapeFor(product.category)}" style="--garment:${escapeHtml(color)}"><span class="placeholder-label">85°X / ESSENTIALS</span></div>`;
+  return `<div class="product-placeholder ${shapeFor(product.category)}" style="--garment:${escapeHtml(color)}"><span class="placeholder-label">CHILD STYLE / LITTLE CLOSET</span></div>`;
 }
 function productImage(product, className = "") {
   const image = product.imageUrl;
@@ -28,7 +28,7 @@ function card(product) {
   const tag = product.tag ? `<span class="product-tag">${escapeHtml(product.tag)}</span>` : "";
   return `<article class="product-card" tabindex="0" role="button" aria-label="查看 ${escapeHtml(product.name)}" data-product-id="${escapeHtml(product.id)}">
     <div class="product-visual">${tag}${productImage(product)}</div>
-    <div class="product-info"><div><p class="product-name">${escapeHtml(product.name)}</p><span class="product-category">${escapeHtml(product.category || "85°X")} · ${escapeHtml(product.subtitle || "")}</span></div><span class="product-price">${money(product.price)}</span></div>
+    <div class="product-info"><div><p class="product-name">${escapeHtml(product.name)}</p><span class="product-category">${escapeHtml(product.category || "Child Style")} · ${escapeHtml(product.subtitle || "")}</span></div><span class="product-price">${money(product.price)}</span></div>
   </article>`;
 }
 function renderNew() {
@@ -53,10 +53,10 @@ function openProduct(id) {
   const p = products.find(item => String(item.id) === String(id));
   if (!p) return;
   $("dialogImage").innerHTML = productImage(p);
-  $("dialogCategory").textContent = `${p.category || "85°X"} / 85°X ESSENTIALS`;
+  $("dialogCategory").textContent = `${p.category || "Child Style"} / CHILD STYLE COLLECTION`;
   $("dialogName").textContent = p.name;
   $("dialogPrice").textContent = money(p.price);
-  $("dialogDescription").textContent = p.description || p.subtitle || "為日常穿搭打造的 85°X 風格選品。";
+  $("dialogDescription").textContent = p.description || p.subtitle || "為日常穿搭打造的 Child Style 童裝選品。";
   const sizes = [...new Set((p.variants || []).map(v => v.size).filter(Boolean))];
   const colors = [...new Set((p.variants || []).map(v => v.color).filter(Boolean))];
   $("sizeSelect").innerHTML = (sizes.length ? sizes : ["請至賣貨便確認"]).map(s => `<option>${escapeHtml(s)}</option>`).join("");
