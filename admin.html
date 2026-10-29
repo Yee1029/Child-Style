@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <title>85°X - store｜管理後台</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html">85<span>°</span>X <small>STORE</small></a>
+    <div class="topbar-right">
+      <span id="signedInEmail" class="signed-email"></span>
+      <button id="logoutBtn" class="btn btn-outline" hidden>登出</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="loginPanel" class="login-wrap">
+      <div class="login-intro">
+        <p class="eyebrow">85°X — STORE MANAGEMENT</p>
+        <h1>管理你的<br><em>風格選品。</em></h1>
+        <p>登入後即可新增商品、上傳圖片、編輯價格與上架狀態。</p>
+      </div>
+      <form id="loginForm" class="panel login-card">
+        <h2>管理員登入</h2>
+        <label for="email">電子郵件</label>
+        <input id="email" type="email" autocomplete="username" required placeholder="admin@example.com">
+        <label for="password">密碼</label>
+        <input id="password" type="password" autocomplete="current-password" required placeholder="輸入 Supabase Auth 密碼">
+        <button class="btn btn-dark btn-full" type="submit">登入管理後台 ↗</button>
+        <p class="hint">請使用你在 Supabase Authentication → Users 建立的管理員帳號。</p>
+        <p id="loginMessage" class="message" role="status"></p>
+      </form>
+    </section>
+
+    <section id="adminPanel" hidden>
+      <div class="welcome-row">
+        <div>
+          <p class="eyebrow">CONTROL CENTER</p>
+          <h1>商品管理 <span>ADMIN</span></h1>
+          <p class="subheading">管理商品、分類、商品圖片與上架狀態。</p>
+        </div>
+        <a class="btn btn-outline" href="index.html" target="_blank" rel="noopener">查看商店 ↗</a>
+      </div>
+
+      <div class="stats-grid">
+        <article class="stat-card"><span>全部商品</span><strong id="totalCount">—</strong></article>
+        <article class="stat-card"><span>已上架</span><strong id="publishedCount">—</strong></article>
+        <article class="stat-card"><span>草稿</span><strong id="draftCount">—</strong></article>
+      </div>
+
+      <div class="admin-layout">
+        <section class="panel product-editor">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PRODUCT EDITOR</p><h2 id="editorTitle">新增商品</h2></div>
+            <button id="resetFormBtn" type="button" class="btn btn-outline">清空表單</button>
+          </div>
+          <form id="productForm">
+            <input id="productId" type="hidden">
+            <div class="form-grid">
+              <div class="field span-2">
+                <label for="productName">商品名稱 *</label>
+                <input id="productName" required maxlength="120" placeholder="例如：85°X 經典短袖 T-Shirt">
+              </div>
+              <div class="field">
+                <label for="categorySelect">商品分類 *</label>
+                <select id="categorySelect" required><option value="">請先建立分類</option></select>
+              </div>
+              <div class="field">
+                <label for="productPrice">售價（NT$）*</label>
+                <input id="productPrice" type="number" min="0" step="1" required placeholder="590">
+              </div>
+              <div class="field">
+                <label for="comparePrice">原價（選填）</label>
+                <input id="comparePrice" type="number" min="0" step="1" placeholder="790">
+              </div>
+              <div class="field">
+                <label for="productSlug">網址代稱（自動產生）</label>
+                <input id="productSlug" maxlength="150" placeholder="classic-tee">
+              </div>
+              <div class="field span-2">
+                <label for="shortDescription">商品簡述</label>
+                <input id="shortDescription" maxlength="240" placeholder="簡短介紹，會顯示在商品名稱下方">
+              </div>
+              <div class="field span-2">
+                <label for="description">商品詳細說明</label>
+                <textarea id="description" rows="4" placeholder="材質、版型、洗滌方式等商品說明"></textarea>
+              </div>
+              <div class="field span-2">
+                <label for="purchaseUrl">賣貨便商品網址</label>
+                <input id="purchaseUrl" type="url" placeholder="https://...">
+              </div>
+              <div class="field">
+                <label for="productStatus">商品狀態</label>
+                <select id="productStatus"><option value="draft">草稿（不公開）</option><option value="published">上架（公開顯示）</option><option value="archived">封存</option></select>
+              </div>
+              <div class="field">
+                <label for="sortOrder">排序（數字越小越前）</label>
+                <input id="sortOrder" type="number" step="1" value="0">
+              </div>
+              <div class="field checkbox-field">
+                <label><input id="isNew" type="checkbox"> 標記為新品</label>
+                <label><input id="isBestseller" type="checkbox"> 標記為熱銷</label>
+              </div>
+              <div class="field span-2">
+                <label for="productImage">商品主圖（JPG / PNG / WebP，建議 5MB 內）</label>
+                <input id="productImage" type="file" accept="image/jpeg,image/png,image/webp">
+                <div id="imagePreview" class="image-preview"><span>尚未選擇圖片</span></div>
+                <p class="hint">上傳後會存到 Supabase Storage 的 product-images bucket。</p>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button id="saveProductBtn" type="submit" class="btn btn-dark">儲存商品</button>
+              <span id="formMessage" class="message" role="status"></span>
+            </div>
+          </form>
+        </section>
+
+        <aside class="panel category-panel">
+          <p class="eyebrow">CATEGORIES</p><h2>分類管理</h2>
+          <form id="categoryForm" class="category-form">
+            <label for="newCategoryName">新增分類</label>
+            <div class="inline-form"><input id="newCategoryName" required maxlength="60" placeholder="例如：上衣"><button class="btn btn-dark" type="submit">新增</button></div>
+          </form>
+          <p id="categoryMessage" class="message" role="status"></p>
+          <div id="categoryList" class="category-list"></div>
+          <p class="hint">刪除分類前請先確認沒有商品使用該分類。此頁目前提供新增分類與啟用狀態管理。</p>
+        </aside>
+      </div>
+
+      <section class="panel inventory-panel">
+        <div class="panel-heading list-heading">
+          <div><p class="eyebrow">YOUR CATALOG</p><h2>商品清單</h2></div>
+          <div class="list-tools">
+            <input id="productSearch" type="search" placeholder="搜尋商品名稱">
+            <select id="statusFilter"><option value="all">全部狀態</option><option value="published">已上架</option><option value="draft">草稿</option><option value="archived">封存</option></select>
+            <button id="refreshBtn" class="btn btn-outline" type="button">重新整理</button>
+          </div>
+        </div>
+        <div id="productList" class="product-list"><p class="hint">正在載入商品…</p></div>
+      </section>
+      <div id="globalMessage" class="global-message" role="status" aria-live="polite"></div>
+    </section>
+  </main>
+  <footer class="footer"><span>85°X - store</span><span>ADMIN PANEL · KEEP YOUR KEYS PRIVATE</span></footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="supabase-client.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
