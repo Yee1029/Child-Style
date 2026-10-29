@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <meta name="description" content="85°X - store｜日常穿搭與風格選品">
+  <title>85°X - store | Wear Your Way</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="announcement">85°X — FIND YOUR EVERYDAY STYLE</div>
+  <header class="site-header">
+    <a class="wordmark" href="#" aria-label="85°X 首頁">85<span>°</span>X <small>STORE</small></a>
+    <nav class="desktop-nav" aria-label="主要導覽">
+      <a href="#new">NEW ARRIVALS</a>
+      <a href="#shop">SHOP ALL</a>
+      <a href="#about">ABOUT 85°X</a>
+    </nav>
+    <button class="menu-toggle" id="menuToggle" aria-label="開啟選單">☰</button>
+  </header>
+  <nav class="mobile-nav" id="mobileNav">
+    <a href="#new">新品上市</a><a href="#shop">所有商品</a><a href="#about">關於 85°X</a>
+  </nav>
+
+  <main>
+    <section class="hero" aria-label="品牌主視覺">
+      <div class="hero-copy">
+        <p class="eyebrow">THE NEW EVERYDAY</p>
+        <h1>MAKE IT<br><em>YOUR</em> STYLE.</h1>
+        <p class="hero-desc">為日常而生，為風格加一點自己的態度。</p>
+        <a class="button button-dark" href="#shop">探索商品 <span>↗</span></a>
+      </div>
+      <div class="hero-art" role="img" aria-label="黑白時尚主視覺">
+        <div class="art-circle"></div>
+        <div class="art-word">85°X</div>
+        <div class="art-caption">STYLE IS<br>PERSONAL.</div>
+        <div class="art-index">001 — 026</div>
+      </div>
+      <div class="hero-bottom"><span>DESIGNED FOR EVERYDAY</span><span>TAIWAN · EST. 2026</span></div>
+    </section>
+
+    <section class="section" id="new">
+      <div class="section-heading">
+        <div><p class="eyebrow">JUST DROPPED</p><h2>新品上市 <span>NEW ARRIVALS</span></h2></div>
+        <a class="text-link" href="#shop">VIEW ALL ↗</a>
+      </div>
+      <div class="product-grid" id="newProducts"></div>
+    </section>
+
+    <section class="category-strip">
+      <a href="#shop" data-category-link="上衣"><span>01</span><strong>上衣 / TOPS</strong><b>↗</b></a>
+      <a href="#shop" data-category-link="下身"><span>02</span><strong>下身 / BOTTOMS</strong><b>↗</b></a>
+      <a href="#shop" data-category-link="配件"><span>03</span><strong>配件 / ACCESSORIES</strong><b>↗</b></a>
+    </section>
+
+    <section class="section" id="shop">
+      <div class="section-heading shop-heading">
+        <div><p class="eyebrow">CURATED FOR YOU</p><h2>所有商品 <span>SHOP ALL</span></h2></div>
+        <div class="shop-tools">
+          <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="搜尋商品" aria-label="搜尋商品"></label>
+          <select id="sortSelect" aria-label="商品排序"><option value="featured">推薦排序</option><option value="price-low">價格：低至高</option><option value="price-high">價格：高至低</option><option value="newest">最新商品</option></select>
+        </div>
+      </div>
+      <div class="category-pills" id="categoryPills">
+        <button class="pill active" data-category="全部">全部商品</button>
+        <button class="pill" data-category="上衣">上衣</button>
+        <button class="pill" data-category="下身">下身</button>
+        <button class="pill" data-category="配件">配件</button>
+      </div>
+      <div class="product-grid" id="allProducts"></div>
+      <p class="empty-state" id="emptyState" hidden>找不到符合條件的商品，試試其他關鍵字吧。</p>
+    </section>
+
+    <section class="brand-note" id="about">
+      <p class="eyebrow">A LITTLE DIFFERENT, EVERY DAY.</p>
+      <h2>YOUR STYLE.<br><em>YOUR RULES.</em></h2>
+      <p>不需要跟著誰的步調。找到舒服的自己，穿出你自己的樣子。</p>
+      <span class="note-mark">85°X</span>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a class="wordmark footer-mark" href="#">85<span>°</span>X <small>STORE</small></a>
+    <p>© 2026 85°X - store. ALL RIGHTS RESERVED.</p>
+    <a href="#top" class="back-top">BACK TO TOP ↑</a>
+  </footer>
+
+  <dialog id="productDialog" class="product-dialog">
+    <button class="dialog-close" id="dialogClose" aria-label="關閉">×</button>
+    <div class="dialog-image" id="dialogImage"></div>
+    <div class="dialog-info">
+      <p class="eyebrow" id="dialogCategory">85°X ESSENTIALS</p>
+      <h2 id="dialogName"></h2>
+      <p class="dialog-price" id="dialogPrice"></p>
+      <p class="dialog-description" id="dialogDescription"></p>
+      <label class="field-label" for="sizeSelect">尺寸 SIZE</label>
+      <select id="sizeSelect"></select>
+      <label class="field-label" for="colorSelect">顏色 COLOR</label>
+      <select id="colorSelect"></select>
+      <p class="stock-note" id="stockNote">商品庫存以賣場資訊為準</p>
+      <a class="button button-dark purchase-button" id="purchaseLink" href="#" target="_blank" rel="noopener noreferrer">前往賣貨便購買 ↗</a>
+      <p class="dialog-hint">價格、庫存及尺寸資訊為網站展示資料，請以賣貨便商品頁為準。</p>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
