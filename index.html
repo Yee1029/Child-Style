@@ -69,7 +69,8 @@
         <button class="pill" data-category="配件">配件</button>
       </div>
       <div class="product-grid" id="allProducts"></div>
-      <p class="empty-state" id="emptyState" hidden>找不到符合條件的商品，試試其他關鍵字吧。</p>
+      <p class="empty-state" id="emptyState" hidden>目前沒有符合條件的商品。商品上架後就會顯示在這裡。</p>
+      <p class="connection-status" id="connectionStatus" aria-live="polite">正在載入商品…</p>
     </section>
 
     <section class="brand-note" id="about">
@@ -83,7 +84,7 @@
   <footer class="site-footer">
     <a class="wordmark footer-mark" href="#">85<span>°</span>X <small>STORE</small></a>
     <p>© 2026 85°X - store. ALL RIGHTS RESERVED.</p>
-    <a href="#top" class="back-top">BACK TO TOP ↑</a>
+    <a href="#" class="back-top">BACK TO TOP ↑</a>
   </footer>
 
   <dialog id="productDialog" class="product-dialog">
@@ -98,12 +99,15 @@
       <select id="sizeSelect"></select>
       <label class="field-label" for="colorSelect">顏色 COLOR</label>
       <select id="colorSelect"></select>
-      <p class="stock-note" id="stockNote">商品庫存以賣場資訊為準</p>
+      <p class="stock-note" id="stockNote">實際庫存與商品資訊請以賣貨便商品頁為準。</p>
       <a class="button button-dark purchase-button" id="purchaseLink" href="#" target="_blank" rel="noopener noreferrer">前往賣貨便購買 ↗</a>
-      <p class="dialog-hint">價格、庫存及尺寸資訊為網站展示資料，請以賣貨便商品頁為準。</p>
+      <p class="dialog-hint">商品展示資訊以網站資料為準；價格、庫存及規格請於賣貨便結帳前再次確認。</p>
     </div>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="supabase-client.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

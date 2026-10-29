@@ -1,25 +1,30 @@
-# 85°X - store
+# 85°X - store — Supabase 連線版
 
-85°X 服飾品牌展示網站初版（純 HTML / CSS / JavaScript）。
+## 上傳檔案
+- `index.html`
+- `styles.css`
+- `supabase-client.js`
+- `app.js`
 
-## 目前功能
-- 響應式首頁與品牌主視覺
-- 新品推薦、商品列表、分類篩選、關鍵字搜尋、價格排序
-- 商品詳細視窗、尺寸與顏色選擇
-- 賣貨便連結欄位（目前為展示資料，尚未設定實際網址）
-- 手機版導覽選單
+請保留你已經建立的 `supabase-config.js`，不要用這個 ZIP 內的檔案覆蓋它（本 ZIP 不包含設定檔）。
 
-## 重要說明
-這個版本使用 `app.js` 內的示範商品資料，並非正式商品庫存。正式上線前，需串接 Supabase，建立商品管理後台、管理員登入、圖片上傳與每個商品的賣貨便 URL。
+## Supabase 設定
+`supabase-config.js` 應包含：
 
-## 本機預覽
-直接用瀏覽器開啟 `index.html` 即可預覽。
+```js
+window.SUPABASE_URL = "https://你的專案ID.supabase.co";
+window.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_你的公開金鑰";
+```
 
-## 部署建議
-使用 Cloudflare Pages 連接 GitHub Repository。因為這是商業品牌網站，不建議使用 GitHub Pages 作為正式商業網站主機。
+只使用 Project URL 與 Publishable key。不要放 `secret`、`service_role` key 或資料庫密碼。
 
-## 下一階段
-1. 將初版檔案上傳到 GitHub。
-2. 預覽並確認品牌視覺。
-3. 建立 Supabase 專案與資料表。
-4. 串接商品資料與管理後台。
+## 商品資料讀取
+網站會從 `public.products` 讀取 `status = 'published'` 的商品，並關聯 `categories`、`product_variants`、`product_images`。
+商品圖片的 `image_url` 必須是可公開讀取的 URL；商品的賣貨便網址填在 `external_purchase_url`。
+
+## 上傳方式
+在 GitHub Repository 根目錄，點 `Add file` → `Upload files`，上傳 ZIP 解壓縮後的四個檔案，覆蓋同名檔案並 Commit changes。
+不要把解壓縮後的整個資料夾再放進子資料夾。
+
+## 注意
+目前尚未有管理後台；商品必須先在 Supabase Table Editor 建立分類與商品資料，且將商品狀態設為 `published`，才會出現在公開網站。
