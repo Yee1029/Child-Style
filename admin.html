@@ -105,10 +105,16 @@
                 <label><input id="isBestseller" type="checkbox"> 標記為熱銷</label>
               </div>
               <div class="field span-2">
-                <label for="productImage">商品主圖（JPG / PNG / WebP，建議 5MB 內）</label>
-                <input id="productImage" type="file" accept="image/jpeg,image/png,image/webp">
-                <div id="imagePreview" class="image-preview"><span>尚未選擇圖片</span></div>
-                <p class="hint">上傳後會存到 Supabase Storage 的 product-images bucket。</p>
+                <label for="productImages">商品照片（可一次選多張，第一張作為主圖）</label>
+                <input id="productImages" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+                <div id="galleryPreview" class="multi-preview"><span>尚未選擇商品照片</span></div>
+                <p class="hint">可上傳多個角度、細節照片；每張最多 5MB。編輯商品時新增照片會接續加入，不會覆蓋舊照片。</p>
+              </div>
+              <div class="field span-2">
+                <label for="sizeChartFile">尺寸表圖片（選填，JPG / PNG / WebP）</label>
+                <input id="sizeChartFile" type="file" accept="image/jpeg,image/png,image/webp">
+                <div id="sizeChartPreview" class="size-chart-preview"><span>尚未設定尺寸表</span></div>
+                <p class="hint">尺寸表會在顧客商品詳情中獨立顯示。重新上傳會取代舊尺寸表。</p>
               </div>
             </div>
             <div class="form-actions">

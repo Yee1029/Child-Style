@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { categories: [], products: [], session: null, selectedFile: null, currentImageUrl: "" };
+  const state = { categories: [], products: [], session: null, selectedFiles: [], sizeChartFile: null, currentSizeChartUrl: "" };
   const client = () => window.supabaseClient;
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
@@ -91,7 +91,7 @@
   }
   async function loadProducts() {
     const { data, error } = await client().from("products")
-      .select("id,category_id,name,slug,short_description,description,price,compare_at_price,external_purchase_url,status,is_new,is_bestseller,sort_order,published_at,created_at,categories(name),product_images(id,image_url,is_primary,sort_order)")
+      .select("id,category_id,name,slug,short_description,description,price,compare_at_price,external_purchase_url,status,is_new,is_bestseller,sort_order,published_at,created_at,categories(name),product_images(id,image_url,is_primary,sort_order,image_type)")
       .order("created_at", { ascending: false });
     if (error) { globalMessage("載入商品失敗：" + error.message, "error"); return; }
     state.products = data || [];
@@ -145,9 +145,10 @@
     $("sortOrder").value = "0";
     $("editorTitle").textContent = "新增商品";
     $("saveProductBtn").textContent = "儲存商品";
-    $("imagePreview").innerHTML = "<span>尚未選擇圖片</span>";
-    state.selectedFile = null;
-    state.currentImageUrl = "";
+    $("galleryPreview").innerHTML = "<span>尚未選擇商品照片</span>";
+    $("sizeChartPreview").innerHTML = "<span>尚未設定尺寸表</span>";
+    $("productImages").value = ""; $("sizeChartFile").value = "";
+    state.selectedFiles = []; state.sizeChartFile = null; state.currentSizeChartUrl = "";
     setMessage("formMessage", "");
   }
   function fillForm(id) {
@@ -167,28 +168,27 @@
     $("isNew").checked = !!p.is_new;
     $("isBestseller").checked = !!p.is_bestseller;
     const imgs = (p.product_images || []).slice().sort((a,b) => Number(b.is_primary)-Number(a.is_primary) || a.sort_order-b.sort_order);
-    state.currentImageUrl = imgs[0]?.image_url || "";
-    state.selectedFile = null;
-    $("productImage").value = "";
-    $("imagePreview").innerHTML = state.currentImageUrl ? `<img src="${escapeHtml(state.currentImageUrl)}" alt="目前商品圖片">` : "<span>尚未設定商品圖片</span>";
+    const gallery = imgs.filter(im => (im.image_type || "gallery") === "gallery");
+    const chart = imgs.find(im => im.image_type === "size_chart");
+    state.selectedFiles = []; state.sizeChartFile = null; state.currentSizeChartUrl = chart?.image_url || "";
+    $("productImages").value = ""; $("sizeChartFile").value = "";
+    $("galleryPreview").innerHTML = gallery.length ? gallery.map((im,i)=>`<div class="preview-item"><img src="${escapeHtml(im.image_url)}" alt="商品照片 ${i+1}"><small>${i===0?"商品照片":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未設定商品照片</span>";
+    $("sizeChartPreview").innerHTML = state.currentSizeChartUrl ? `<img src="${escapeHtml(state.currentSizeChartUrl)}" alt="目前尺寸表">` : "<span>尚未設定尺寸表</span>";
     $("editorTitle").textContent = "編輯商品";
     $("saveProductBtn").textContent = "儲存修改";
     setMessage("formMessage", "已載入商品，可直接修改。", "success");
     $("productForm").scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  async function uploadImage(file, productId) {
-    if (!file) return state.currentImageUrl || "";
+  async function uploadImage(file, productId, prefix = "gallery") {
+    if (!file) return "";
     const allowed = ["image/jpeg", "image/png", "image/webp"];
     if (!allowed.includes(file.type)) throw new Error("圖片格式僅支援 JPG、PNG、WebP。");
-    if (file.size > 5 * 1024 * 1024) throw new Error("圖片大小不可超過 5MB。");
+    if (file.size > 5 * 1024 * 1024) throw new Error("每張圖片大小不可超過 5MB。");
     const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-    const path = `${productId}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-    const { error: uploadError } = await client().storage.from("product-images").upload(path, file, {
-      cacheControl: "3600", upsert: false, contentType: file.type
-    });
-    if (uploadError) throw new Error("圖片上傳失敗：" + uploadError.message);
-    const { data } = client().storage.from("product-images").getPublicUrl(path);
-    return data.publicUrl;
+    const path = `${productId}/${prefix}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
+    const { error } = await client().storage.from("product-images").upload(path, file, { cacheControl: "3600", upsert: false, contentType: file.type });
+    if (error) throw new Error("圖片上傳失敗：" + error.message);
+    return client().storage.from("product-images").getPublicUrl(path).data.publicUrl;
   }
   async function saveProduct(event) {
     event.preventDefault();
@@ -226,20 +226,35 @@
         productId = data.id;
       }
 
-      const imageUrl = await uploadImage(state.selectedFile, productId);
-      if (imageUrl) {
-        const { data: existing, error: fetchImageError } = await client().from("product_images")
-          .select("id").eq("product_id", productId).eq("is_primary", true).limit(1);
-        if (fetchImageError) throw fetchImageError;
-        if (existing && existing.length) {
-          const { error } = await client().from("product_images").update({
-            image_url: imageUrl, alt_text: name, is_primary: true, sort_order: 0
-          }).eq("id", existing[0].id);
+      // Append all newly selected gallery photos; keep existing photos intact.
+      const { data: existingGallery, error: galleryReadError } = await client().from("product_images")
+        .select("id,sort_order,is_primary,image_type").eq("product_id", productId).eq("image_type", "gallery").order("sort_order", { ascending: true });
+      if (galleryReadError) throw galleryReadError;
+      let nextOrder = (existingGallery || []).reduce((m, im) => Math.max(m, Number(im.sort_order || 0)), -1) + 1;
+      for (let i = 0; i < state.selectedFiles.length; i++) {
+        const imageUrl = await uploadImage(state.selectedFiles[i], productId, "gallery");
+        const isPrimary = (existingGallery || []).length === 0 && i === 0;
+        const { error } = await client().from("product_images").insert({
+          product_id: productId, image_url: imageUrl, alt_text: `${name} 商品照片 ${nextOrder + 1}`,
+          is_primary: isPrimary, sort_order: nextOrder++, image_type: "gallery"
+        });
+        if (error) throw error;
+      }
+      // A newly selected size chart replaces the previous size-chart record.
+      if (state.sizeChartFile) {
+        const chartUrl = await uploadImage(state.sizeChartFile, productId, "size-chart");
+        const { data: oldCharts, error: chartReadError } = await client().from("product_images")
+          .select("id").eq("product_id", productId).eq("image_type", "size_chart");
+        if (chartReadError) throw chartReadError;
+        if (oldCharts?.length) {
+          const { error } = await client().from("product_images").update({ image_url: chartUrl, alt_text: `${name} 尺寸表`, is_primary: false, sort_order: 0, image_type: "size_chart" }).eq("id", oldCharts[0].id);
           if (error) throw error;
+          if (oldCharts.length > 1) {
+            const { error: deleteError } = await client().from("product_images").delete().in("id", oldCharts.slice(1).map(x=>x.id));
+            if (deleteError) throw deleteError;
+          }
         } else {
-          const { error } = await client().from("product_images").insert({
-            product_id: productId, image_url: imageUrl, alt_text: name, is_primary: true, sort_order: 0
-          });
+          const { error } = await client().from("product_images").insert({ product_id: productId, image_url: chartUrl, alt_text: `${name} 尺寸表`, is_primary: false, sort_order: 0, image_type: "size_chart" });
           if (error) throw error;
         }
       }
@@ -265,17 +280,18 @@
     globalMessage(status === "published" ? "商品已上架。" : "商品已轉為草稿。", "success");
     await loadProducts();
   }
-  function previewFile(file) {
-    state.selectedFile = file || null;
-    if (!file) {
-      $("imagePreview").innerHTML = state.currentImageUrl ? `<img src="${escapeHtml(state.currentImageUrl)}" alt="目前商品圖片">` : "<span>尚未選擇圖片</span>";
-      return;
+  function previewGalleryFiles(files) {
+    state.selectedFiles = Array.from(files || []);
+    if (state.selectedFiles.some(f => !["image/jpeg","image/png","image/webp"].includes(f.type) || f.size > 5*1024*1024)) {
+      state.selectedFiles = []; setMessage("formMessage", "請選擇 JPG、PNG、WebP，且每張圖片不得超過 5MB。", "error"); return;
     }
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setMessage("formMessage", "圖片格式僅支援 JPG、PNG、WebP。", "error"); return;
-    }
-    const url = URL.createObjectURL(file);
-    $("imagePreview").innerHTML = `<img src="${url}" alt="圖片預覽">`;
+    $("galleryPreview").innerHTML = state.selectedFiles.length ? state.selectedFiles.map((f,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(f)}" alt="預覽 ${i+1}"><small>${i===0?"本次第一張":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未選擇新照片</span>";
+  }
+  function previewSizeChart(file) {
+    state.sizeChartFile = file || null;
+    if (!file) { $("sizeChartPreview").innerHTML = state.currentSizeChartUrl ? `<img src="${escapeHtml(state.currentSizeChartUrl)}" alt="目前尺寸表">` : "<span>尚未設定尺寸表</span>"; return; }
+    if (!["image/jpeg","image/png","image/webp"].includes(file.type) || file.size > 5*1024*1024) { state.sizeChartFile=null; setMessage("formMessage", "尺寸表請使用 JPG、PNG、WebP，且不得超過 5MB。", "error"); return; }
+    $("sizeChartPreview").innerHTML = `<img src="${URL.createObjectURL(file)}" alt="尺寸表預覽">`;
   }
   function wireEvents() {
     $("loginForm").addEventListener("submit", handleLogin);
@@ -283,7 +299,8 @@
     $("categoryForm").addEventListener("submit", createCategory);
     $("productForm").addEventListener("submit", saveProduct);
     $("resetFormBtn").addEventListener("click", resetForm);
-    $("productImage").addEventListener("change", e => previewFile(e.target.files?.[0]));
+    $("productImages").addEventListener("change", e => previewGalleryFiles(e.target.files));
+    $("sizeChartFile").addEventListener("change", e => previewSizeChart(e.target.files?.[0]));
     $("productName").addEventListener("input", () => {
       if (!$("productId").value && !$("productSlug").dataset.edited) $("productSlug").value = slugify($("productName").value);
     });
