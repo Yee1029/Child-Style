@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { categories: [], products: [], session: null, selectedFiles: [], sizeChartFile: null, currentSizeChartUrl: "" };
+  const state = { categories: [], products: [], session: null, selectedFiles: [], sizeChartFiles: [], currentSizeChartUrls: [], variants: [] };
   const client = () => window.supabaseClient;
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
@@ -91,7 +91,7 @@
   }
   async function loadProducts() {
     const { data, error } = await client().from("products")
-      .select("id,category_id,name,slug,short_description,description,price,compare_at_price,external_purchase_url,status,is_new,is_bestseller,sort_order,published_at,created_at,categories(name),product_images(id,image_url,is_primary,sort_order,image_type)")
+      .select("id,category_id,name,slug,short_description,description,price,compare_at_price,external_purchase_url,status,is_new,is_bestseller,sort_order,published_at,created_at,categories(name),product_images(id,image_url,is_primary,sort_order,image_type),product_variants(id,size,color,stock_quantity,is_active,sort_order)")
       .order("created_at", { ascending: false });
     if (error) { globalMessage("載入商品失敗：" + error.message, "error"); return; }
     state.products = data || [];
@@ -138,6 +138,26 @@
     if (error) { globalMessage("更新分類失敗：" + error.message, "error"); return; }
     await loadCategories();
   }
+  function variantRow(size = "", color = "", note = "") {
+    const row = document.createElement("div");
+    row.className = "variant-row";
+    row.innerHTML = `
+      <input class="variant-size" maxlength="40" placeholder="例如 120 / S" value="${escapeHtml(size)}" aria-label="尺寸">
+      <input class="variant-color" maxlength="40" placeholder="例如 黑色 / 米白" value="${escapeHtml(color)}" aria-label="顏色">
+      <button type="button" class="variant-remove" aria-label="移除此規格" title="移除此規格">×</button>`;
+    $("variantRows").appendChild(row);
+  }
+  function readVariantRows() {
+    return Array.from($("variantRows").querySelectorAll(".variant-row")).map(row => ({
+      size: row.querySelector(".variant-size").value.trim(),
+      color: row.querySelector(".variant-color").value.trim(),
+      note: ""
+    })).filter(v => v.size || v.color);
+  }
+  function renderVariantRows(items = []) {
+    $("variantRows").innerHTML = "";
+    (items.length ? items : [{size:"",color:"",note:""}]).forEach(v => variantRow(v.size || "", v.color || "", v.note || ""));
+  }
   function resetForm() {
     $("productForm").reset();
     $("productId").value = "";
@@ -147,8 +167,9 @@
     $("saveProductBtn").textContent = "儲存商品";
     $("galleryPreview").innerHTML = "<span>尚未選擇商品照片</span>";
     $("sizeChartPreview").innerHTML = "<span>尚未設定尺寸表</span>";
-    $("productImages").value = ""; $("sizeChartFile").value = "";
-    state.selectedFiles = []; state.sizeChartFile = null; state.currentSizeChartUrl = "";
+    $("productImages").value = ""; $("sizeChartFiles").value = "";
+    state.selectedFiles = []; state.sizeChartFiles = []; state.currentSizeChartUrls = [];
+    renderVariantRows([]);
     setMessage("formMessage", "");
   }
   function fillForm(id) {
@@ -167,13 +188,14 @@
     $("sortOrder").value = p.sort_order ?? 0;
     $("isNew").checked = !!p.is_new;
     $("isBestseller").checked = !!p.is_bestseller;
+    renderVariantRows((p.product_variants || []).filter(v => v.is_active !== false).sort((a,b) => Number(a.sort_order||0)-Number(b.sort_order||0)).map(v => ({size:v.size,color:v.color,note:""})));
     const imgs = (p.product_images || []).slice().sort((a,b) => Number(b.is_primary)-Number(a.is_primary) || a.sort_order-b.sort_order);
     const gallery = imgs.filter(im => (im.image_type || "gallery") === "gallery");
-    const chart = imgs.find(im => im.image_type === "size_chart");
-    state.selectedFiles = []; state.sizeChartFile = null; state.currentSizeChartUrl = chart?.image_url || "";
-    $("productImages").value = ""; $("sizeChartFile").value = "";
+    const charts = imgs.filter(im => im.image_type === "size_chart");
+    state.selectedFiles = []; state.sizeChartFiles = []; state.currentSizeChartUrls = charts.map(im => im.image_url);
+    $("productImages").value = ""; $("sizeChartFiles").value = "";
     $("galleryPreview").innerHTML = gallery.length ? gallery.map((im,i)=>`<div class="preview-item"><img src="${escapeHtml(im.image_url)}" alt="商品照片 ${i+1}"><small>${i===0?"商品照片":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未設定商品照片</span>";
-    $("sizeChartPreview").innerHTML = state.currentSizeChartUrl ? `<img src="${escapeHtml(state.currentSizeChartUrl)}" alt="目前尺寸表">` : "<span>尚未設定尺寸表</span>";
+    $("sizeChartPreview").innerHTML = state.currentSizeChartUrls.length ? state.currentSizeChartUrls.map((url,i)=>`<div class="preview-item"><img src="${escapeHtml(url)}" alt="目前尺寸表 ${i+1}"><small>尺寸表 ${i+1}</small></div>`).join("") : "<span>尚未設定尺寸表</span>";
     $("editorTitle").textContent = "編輯商品";
     $("saveProductBtn").textContent = "儲存修改";
     setMessage("formMessage", "已載入商品，可直接修改。", "success");
@@ -226,6 +248,24 @@
         productId = data.id;
       }
 
+      // Save the product's size/color combinations. These are display specifications, not checkout selections.
+      const variantItems = readVariantRows();
+      const { error: variantDeleteError } = await client().from("product_variants").delete().eq("product_id", productId);
+      if (variantDeleteError) throw variantDeleteError;
+      if (variantItems.length) {
+        const variantPayload = variantItems.map((v, index) => ({
+          product_id: productId,
+          sku: `${slug}-${index + 1}`,
+          size: v.size || null,
+          color: v.color || null,
+          stock_quantity: 0,
+          is_active: true,
+          sort_order: index
+        }));
+        const { error: variantInsertError } = await client().from("product_variants").insert(variantPayload);
+        if (variantInsertError) throw variantInsertError;
+      }
+
       // Append all newly selected gallery photos; keep existing photos intact.
       const { data: existingGallery, error: galleryReadError } = await client().from("product_images")
         .select("id,sort_order,is_primary,image_type").eq("product_id", productId).eq("image_type", "gallery").order("sort_order", { ascending: true });
@@ -240,21 +280,20 @@
         });
         if (error) throw error;
       }
-      // A newly selected size chart replaces the previous size-chart record.
-      if (state.sizeChartFile) {
-        const chartUrl = await uploadImage(state.sizeChartFile, productId, "size-chart");
-        const { data: oldCharts, error: chartReadError } = await client().from("product_images")
-          .select("id").eq("product_id", productId).eq("image_type", "size_chart");
+      // Newly selected size charts are appended; existing size charts remain intact.
+      if (state.sizeChartFiles.length) {
+        const { data: existingCharts, error: chartReadError } = await client().from("product_images")
+          .select("sort_order").eq("product_id", productId).eq("image_type", "size_chart")
+          .order("sort_order", { ascending: true });
         if (chartReadError) throw chartReadError;
-        if (oldCharts?.length) {
-          const { error } = await client().from("product_images").update({ image_url: chartUrl, alt_text: `${name} 尺寸表`, is_primary: false, sort_order: 0, image_type: "size_chart" }).eq("id", oldCharts[0].id);
-          if (error) throw error;
-          if (oldCharts.length > 1) {
-            const { error: deleteError } = await client().from("product_images").delete().in("id", oldCharts.slice(1).map(x=>x.id));
-            if (deleteError) throw deleteError;
-          }
-        } else {
-          const { error } = await client().from("product_images").insert({ product_id: productId, image_url: chartUrl, alt_text: `${name} 尺寸表`, is_primary: false, sort_order: 0, image_type: "size_chart" });
+        let chartOrder = (existingCharts || []).reduce((m, im) => Math.max(m, Number(im.sort_order || 0)), -1) + 1;
+        for (let i = 0; i < state.sizeChartFiles.length; i++) {
+          const chartUrl = await uploadImage(state.sizeChartFiles[i], productId, "size-chart");
+          const { error } = await client().from("product_images").insert({
+            product_id: productId, image_url: chartUrl,
+            alt_text: `${name} 尺寸表 ${chartOrder + 1}`,
+            is_primary: false, sort_order: chartOrder++, image_type: "size_chart"
+          });
           if (error) throw error;
         }
       }
@@ -287,11 +326,17 @@
     }
     $("galleryPreview").innerHTML = state.selectedFiles.length ? state.selectedFiles.map((f,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(f)}" alt="預覽 ${i+1}"><small>${i===0?"本次第一張":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未選擇新照片</span>";
   }
-  function previewSizeChart(file) {
-    state.sizeChartFile = file || null;
-    if (!file) { $("sizeChartPreview").innerHTML = state.currentSizeChartUrl ? `<img src="${escapeHtml(state.currentSizeChartUrl)}" alt="目前尺寸表">` : "<span>尚未設定尺寸表</span>"; return; }
-    if (!["image/jpeg","image/png","image/webp"].includes(file.type) || file.size > 5*1024*1024) { state.sizeChartFile=null; setMessage("formMessage", "尺寸表請使用 JPG、PNG、WebP，且不得超過 5MB。", "error"); return; }
-    $("sizeChartPreview").innerHTML = `<img src="${URL.createObjectURL(file)}" alt="尺寸表預覽">`;
+  function previewSizeCharts(files) {
+    state.sizeChartFiles = Array.from(files || []);
+    if (state.sizeChartFiles.some(file => !["image/jpeg","image/png","image/webp"].includes(file.type) || file.size > 5*1024*1024)) {
+      state.sizeChartFiles = [];
+      $("sizeChartFiles").value = "";
+      setMessage("formMessage", "尺寸表請使用 JPG、PNG、WebP，且每張不得超過 5MB。", "error");
+      return;
+    }
+    const existing = state.currentSizeChartUrls.map((url,i)=>`<div class="preview-item"><img src="${escapeHtml(url)}" alt="既有尺寸表 ${i+1}"><small>既有尺寸表 ${i+1}</small></div>`).join("");
+    const added = state.sizeChartFiles.map((file,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(file)}" alt="新尺寸表預覽 ${i+1}"><small>新增尺寸表 ${i+1}</small></div>`).join("");
+    $("sizeChartPreview").innerHTML = existing + added || "<span>尚未設定尺寸表</span>";
   }
   function wireEvents() {
     $("loginForm").addEventListener("submit", handleLogin);
@@ -300,7 +345,18 @@
     $("productForm").addEventListener("submit", saveProduct);
     $("resetFormBtn").addEventListener("click", resetForm);
     $("productImages").addEventListener("change", e => previewGalleryFiles(e.target.files));
-    $("sizeChartFile").addEventListener("change", e => previewSizeChart(e.target.files?.[0]));
+    $("sizeChartFiles").addEventListener("change", e => previewSizeCharts(e.target.files));
+    $("addVariantBtn").addEventListener("click", () => variantRow());
+    $("variantRows").addEventListener("click", e => {
+      const remove = e.target.closest(".variant-remove");
+      if (remove) {
+        const rows = $("variantRows").querySelectorAll(".variant-row");
+        if (rows.length > 1) remove.closest(".variant-row").remove();
+        else {
+          remove.closest(".variant-row").querySelectorAll("input").forEach(input => input.value = "");
+        }
+      }
+    });
     $("productName").addEventListener("input", () => {
       if (!$("productId").value && !$("productSlug").dataset.edited) $("productSlug").value = slugify($("productName").value);
     });
@@ -320,6 +376,7 @@
     });
   }
   async function init() {
+    renderVariantRows([]);
     wireEvents();
     if (!client()) {
       setMessage("loginMessage", "Supabase 設定未載入，請確認 supabase-config.js、supabase-client.js 與網路連線。", "error");
