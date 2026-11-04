@@ -24,3 +24,13 @@
 .variant-table-wrap .variant-row-head span:last-child{text-align:center}
 .variant-table-wrap #variantRows .variant-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 38px}
 .variant-table-wrap #variantRows .variant-row input{min-width:0}
+
+/* Clear, visible size/color specification editor */
+.variant-editor{display:block!important;grid-column:1/-1;margin:8px 0 18px;padding:18px;background:#fff8f2;border:1px solid #dfcfc3;border-radius:8px}
+.variant-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
+.variant-heading .hint{margin:5px 0 0}
+.variant-row-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 38px;gap:8px}
+.variant-table-wrap #variantRows .variant-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 38px;gap:8px;align-items:center;margin:8px 0}
+.variant-table-wrap #variantRows .variant-row input{width:100%;min-width:0}
+.variant-remove{width:36px;height:40px;border:1px solid #eadfd5;background:#fff;border-radius:5px;font-size:22px;color:#8b6255;cursor:pointer}
+@media(max-width:640px){.variant-heading{flex-direction:column}}

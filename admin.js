@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { categories: [], products: [], session: null, selectedFiles: [], sizeChartFiles: [], currentSizeChartUrls: [], variants: [] };
+  const state = { categories: [], products: [], session: null, selectedFiles: [], variants: [] };
   const client = () => window.supabaseClient;
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
@@ -166,9 +166,8 @@
     $("editorTitle").textContent = "新增商品";
     $("saveProductBtn").textContent = "儲存商品";
     $("galleryPreview").innerHTML = "<span>尚未選擇商品照片</span>";
-    $("sizeChartPreview").innerHTML = "<span>尚未設定尺寸表</span>";
-    $("productImages").value = ""; $("sizeChartFiles").value = "";
-    state.selectedFiles = []; state.sizeChartFiles = []; state.currentSizeChartUrls = [];
+    $("productImages").value = "";
+    state.selectedFiles = [];
     renderVariantRows([]);
     setMessage("formMessage", "");
   }
@@ -190,12 +189,10 @@
     $("isBestseller").checked = !!p.is_bestseller;
     renderVariantRows((p.product_variants || []).filter(v => v.is_active !== false).sort((a,b) => Number(a.sort_order||0)-Number(b.sort_order||0)).map(v => ({size:v.size,color:v.color,note:""})));
     const imgs = (p.product_images || []).slice().sort((a,b) => Number(b.is_primary)-Number(a.is_primary) || a.sort_order-b.sort_order);
-    const gallery = imgs.filter(im => (im.image_type || "gallery") === "gallery");
-    const charts = imgs.filter(im => im.image_type === "size_chart");
-    state.selectedFiles = []; state.sizeChartFiles = []; state.currentSizeChartUrls = charts.map(im => im.image_url);
-    $("productImages").value = ""; $("sizeChartFiles").value = "";
-    $("galleryPreview").innerHTML = gallery.length ? gallery.map((im,i)=>`<div class="preview-item"><img src="${escapeHtml(im.image_url)}" alt="商品照片 ${i+1}"><small>${i===0?"商品照片":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未設定商品照片</span>";
-    $("sizeChartPreview").innerHTML = state.currentSizeChartUrls.length ? state.currentSizeChartUrls.map((url,i)=>`<div class="preview-item"><img src="${escapeHtml(url)}" alt="目前尺寸表 ${i+1}"><small>尺寸表 ${i+1}</small></div>`).join("") : "<span>尚未設定尺寸表</span>";
+    const gallery = imgs;
+    state.selectedFiles = [];
+    $("productImages").value = "";
+    $("galleryPreview").innerHTML = gallery.length ? gallery.map((im,i)=>`<div class="preview-item"><img src="${escapeHtml(im.image_url)}" alt="商品圖片 ${i+1}"><small>${im.image_type==="size_chart"?"尺寸表":`照片 ${i+1}`}</small></div>`).join("") : "<span>尚未設定商品照片</span>";
     $("editorTitle").textContent = "編輯商品";
     $("saveProductBtn").textContent = "儲存修改";
     setMessage("formMessage", "已載入商品，可直接修改。", "success");
@@ -255,7 +252,7 @@
       if (variantItems.length) {
         const variantPayload = variantItems.map((v, index) => ({
           product_id: productId,
-          sku: `${slug}-${index + 1}`,
+          sku: `${slug}-${String(productId).replace(/-/g,"").slice(0,8)}-${index + 1}`,
           size: v.size || null,
           color: v.color || null,
           stock_quantity: 0,
@@ -279,23 +276,6 @@
           is_primary: isPrimary, sort_order: nextOrder++, image_type: "gallery"
         });
         if (error) throw error;
-      }
-      // Newly selected size charts are appended; existing size charts remain intact.
-      if (state.sizeChartFiles.length) {
-        const { data: existingCharts, error: chartReadError } = await client().from("product_images")
-          .select("sort_order").eq("product_id", productId).eq("image_type", "size_chart")
-          .order("sort_order", { ascending: true });
-        if (chartReadError) throw chartReadError;
-        let chartOrder = (existingCharts || []).reduce((m, im) => Math.max(m, Number(im.sort_order || 0)), -1) + 1;
-        for (let i = 0; i < state.sizeChartFiles.length; i++) {
-          const chartUrl = await uploadImage(state.sizeChartFiles[i], productId, "size-chart");
-          const { error } = await client().from("product_images").insert({
-            product_id: productId, image_url: chartUrl,
-            alt_text: `${name} 尺寸表 ${chartOrder + 1}`,
-            is_primary: false, sort_order: chartOrder++, image_type: "size_chart"
-          });
-          if (error) throw error;
-        }
       }
       setMessage("formMessage", "儲存成功！", "success");
       globalMessage("商品已儲存。", "success");
@@ -326,18 +306,6 @@
     }
     $("galleryPreview").innerHTML = state.selectedFiles.length ? state.selectedFiles.map((f,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(f)}" alt="預覽 ${i+1}"><small>${i===0?"本次第一張":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未選擇新照片</span>";
   }
-  function previewSizeCharts(files) {
-    state.sizeChartFiles = Array.from(files || []);
-    if (state.sizeChartFiles.some(file => !["image/jpeg","image/png","image/webp"].includes(file.type) || file.size > 5*1024*1024)) {
-      state.sizeChartFiles = [];
-      $("sizeChartFiles").value = "";
-      setMessage("formMessage", "尺寸表請使用 JPG、PNG、WebP，且每張不得超過 5MB。", "error");
-      return;
-    }
-    const existing = state.currentSizeChartUrls.map((url,i)=>`<div class="preview-item"><img src="${escapeHtml(url)}" alt="既有尺寸表 ${i+1}"><small>既有尺寸表 ${i+1}</small></div>`).join("");
-    const added = state.sizeChartFiles.map((file,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(file)}" alt="新尺寸表預覽 ${i+1}"><small>新增尺寸表 ${i+1}</small></div>`).join("");
-    $("sizeChartPreview").innerHTML = existing + added || "<span>尚未設定尺寸表</span>";
-  }
   function wireEvents() {
     $("loginForm").addEventListener("submit", handleLogin);
     $("logoutBtn").addEventListener("click", handleLogout);
@@ -345,7 +313,6 @@
     $("productForm").addEventListener("submit", saveProduct);
     $("resetFormBtn").addEventListener("click", resetForm);
     $("productImages").addEventListener("change", e => previewGalleryFiles(e.target.files));
-    $("sizeChartFiles").addEventListener("change", e => previewSizeCharts(e.target.files));
     $("addVariantBtn").addEventListener("click", () => variantRow());
     $("variantRows").addEventListener("click", e => {
       const remove = e.target.closest(".variant-remove");
