@@ -17,3 +17,10 @@
 .variant-remove{width:36px;height:38px;border:1px solid #eadfd5;border-radius:6px;background:#fff;color:#8b6255;font-size:22px;cursor:pointer}
 .variant-remove:hover{background:#f7e9e2}
 @media(max-width:640px){.variant-heading{flex-direction:column}.variant-row{grid-template-columns:1fr 1fr 34px}}
+
+/* Variant editor layout refinement */
+.variant-editor{display:block!important;visibility:visible!important;grid-column:1/-1}
+.variant-table-wrap .variant-row-head{grid-template-columns:1fr 1fr 38px}
+.variant-table-wrap .variant-row-head span:last-child{text-align:center}
+.variant-table-wrap #variantRows .variant-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 38px}
+.variant-table-wrap #variantRows .variant-row input{min-width:0}
