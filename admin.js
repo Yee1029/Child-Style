@@ -366,32 +366,83 @@
   async function readSellerExcel(file) {
     if (!window.XLSX) throw new Error("Excel 解析元件載入失敗，請重新整理後再試。");
     const buffer = await file.arrayBuffer();
-    const book = XLSX.read(buffer, {type:"array", cellDates:false});
-    const sheet = book.Sheets["非訂單匯入"] || book.Sheets[book.SheetNames[0]];
-    if (!sheet) throw new Error("找不到訂單工作表。");
-    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:"", raw:false});
-    const headerIndex = rows.findIndex(row => row.some(v => String(v).includes("訂單編號")) && row.some(v => String(v).includes("商品名稱")));
-    if (headerIndex < 0) throw new Error("找不到「訂單編號」及「商品名稱」欄位，請確認是賣貨便訂單資訊 Excel。");
-    const headers = rows[headerIndex].map(v=>String(v).replace(/\s+/g,"").replace(/\n/g,""));
-    const col = name => headers.findIndex(v=>v.includes(name));
-    const idx = {order:col("訂單編號"),date:col("訂購日期"),status:col("狀態"),item:col("商品名稱"),qty:col("數量"),price:col("優惠價"),recipient:col("收件人姓名")};
-    if (idx.order<0 || idx.item<0 || idx.qty<0) throw new Error("訂單表缺少必要欄位（訂單編號、商品名稱或數量）。");
-    let currentOrder="", currentDate="", currentStatus="", currentRecipient="", lineNo=0;
-    const output=[];
-    for (let r=headerIndex+1;r<rows.length;r++) {
-      const row=rows[r];
-      const order=String(row[idx.order]||"").trim();
-      if (order) { currentOrder=order; currentDate=String(row[idx.date]||""); currentStatus=String(row[idx.status]||"").replace(/\s+/g," ").trim(); currentRecipient=String(row[idx.recipient]||""); lineNo=0; }
-      const itemRaw=String(row[idx.item]||"").trim();
-      if (!currentOrder || !itemRaw) continue;
-      const parsed=parseSellerItem(itemRaw);
-      const quantity=Math.max(0, Number(String(row[idx.qty]||"0").replace(/,/g,""))||0);
-      if (!quantity) continue;
-      output.push({external_order_id:currentOrder,line_key:String(lineNo++),order_date:currentDate,order_status:currentStatus,recipient:currentRecipient,product_name:parsed.product_name,raw_item_name:itemRaw,size:parsed.size,color:parsed.color,quantity,unit_price:Number(String(row[idx.price]||"0").replace(/,/g,""))||0,source_file:file.name});
+    const book = XLSX.read(buffer, { type: "array", cellDates: false, dense: false });
+    const normalize = value => String(value ?? "").replace(/[\s\u3000\uFEFF]+/g, "").trim();
+    let selected = null;
+    // 賣貨便匯出檔可能同時有「非訂單匯入」及「訂單匯入」工作表；
+    // 逐張尋找真正含有訂單明細的表，不只依賴工作表名稱。
+    for (const sheetName of book.SheetNames) {
+      const sheet = book.Sheets[sheetName];
+      if (!sheet) continue;
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false, blankrows: false });
+      const headerIndex = rows.findIndex(row => {
+        const cells = row.map(normalize);
+        return cells.some(v => v.includes("訂單編號")) &&
+          cells.some(v => v.includes("商品名稱") || v.includes("品名/規格")) &&
+          cells.some(v => v === "數量" || v.includes("數量"));
+      });
+      if (headerIndex >= 0) {
+        const headers = rows[headerIndex].map(normalize);
+        const findCol = (...names) => headers.findIndex(h => names.some(n => h.includes(n)));
+        const idx = {
+          order: findCol("訂單編號"),
+          date: findCol("訂購日期"),
+          status: findCol("狀態"),
+          item: findCol("商品名稱", "品名/規格"),
+          qty: findCol("數量"),
+          price: findCol("優惠價", "單價"),
+          recipient: findCol("收件人姓名")
+        };
+        if (idx.order >= 0 && idx.item >= 0 && idx.qty >= 0) {
+          selected = { sheetName, rows, headerIndex, idx };
+          // 優先使用有實際明細的工作表
+          const hasData = rows.slice(headerIndex + 1).some(row => String(row[idx.item] || "").trim());
+          if (hasData) break;
+        }
+      }
     }
-    if (!output.length) throw new Error("沒有找到可匯入的商品明細。");
+    if (!selected) throw new Error("找不到賣貨便訂單明細欄位。請確認上傳的是「訂單資訊」Excel。");
+    const { rows, headerIndex, idx, sheetName } = selected;
+    let currentOrder = "", currentDate = "", currentStatus = "", currentRecipient = "";
+    const output = [];
+    for (let r = headerIndex + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const orderCell = String(row[idx.order] || "").trim();
+      if (orderCell) {
+        currentOrder = orderCell;
+        currentDate = idx.date >= 0 ? String(row[idx.date] || "") : "";
+        currentStatus = idx.status >= 0 ? String(row[idx.status] || "").replace(/\s+/g, " ").trim() : "";
+        currentRecipient = idx.recipient >= 0 ? String(row[idx.recipient] || "") : "";
+      }
+      const itemRaw = String(row[idx.item] || "").trim();
+      if (!currentOrder || !itemRaw) continue;
+      const parsed = parseSellerItem(itemRaw);
+      const quantityText = String(row[idx.qty] ?? "").replace(/,/g, "").trim();
+      const quantity = Number(quantityText);
+      if (!Number.isFinite(quantity) || quantity <= 0) continue;
+      const priceText = idx.price >= 0 ? String(row[idx.price] ?? "").replace(/,/g, "").trim() : "";
+      const unitPrice = Number(priceText) || 0;
+      output.push({
+        external_order_id: currentOrder,
+        line_key: `${sheetName}-${r + 1}`,
+        order_date: currentDate,
+        order_status: currentStatus,
+        recipient: currentRecipient,
+        product_name: parsed.product_name,
+        raw_item_name: itemRaw,
+        size: parsed.size,
+        color: parsed.color,
+        quantity,
+        unit_price: unitPrice,
+        source_file: file.name
+      });
+    }
+    if (!output.length) {
+      throw new Error(`已讀取工作表「${sheetName}」，但沒有找到有效商品明細。請確認商品名稱與數量欄有資料。`);
+    }
     return output;
   }
+
   async function importSellerOrders() {
     const file=$("sellerOrderFile").files[0];
     if (!file) return;
@@ -401,7 +452,7 @@
       parsedSellerOrders=await readSellerExcel(file);
       const {error}=await client().from("seller_order_lines").upsert(parsedSellerOrders,{onConflict:"external_order_id,line_key"});
       if(error) throw error;
-      $("orderImportStatus").textContent=`成功匯入 ${parsedSellerOrders.length} 筆商品明細。`;
+      $("orderImportStatus").textContent=`成功匯入 ${parsedSellerOrders.length} 筆商品明細（工作表自動辨識）。`;
       $("orderImportStatus").className="message success";
       await loadSellerOrderStats();
     } catch(err) {
