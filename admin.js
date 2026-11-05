@@ -389,7 +389,7 @@
     // even though actual item rows continue below row 3. Determine the last
     // real row from populated cell addresses instead of trusting !ref.
     const populatedRows = Object.keys(sheet)
-      .map(address => /^([A-Z]+)(\\d+)$/.exec(address))
+      .map(address => /^([A-Z]+)(\d+)$/.exec(address))
       .filter(Boolean)
       .map(match => Number(match[2]) - 1);
     const lastDataRow = Math.max(firstDataRow, ...populatedRows);
