@@ -70,7 +70,12 @@
           <input id="orderSearch" type="search" placeholder="搜尋商品名稱、尺寸或顏色">
           <select id="orderStatusFilter"><option value="active">有效訂單（排除取消）</option><option value="all">全部狀態</option></select>
         </div>
-        <div class="order-table-wrap"><table class="order-table"><thead><tr><th>商品</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>訂單數</th></tr></thead><tbody id="orderStatsRows"><tr><td colspan="5">尚未匯入訂單</td></tr></tbody></table></div>
+        <div class="order-table-wrap"><table class="order-table"><thead><tr><th>商品樣式</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>訂單數</th></tr></thead><tbody id="orderStatsRows"><tr><td colspan="5">尚未匯入訂單</td></tr></tbody></table></div>
+        <div class="order-pagination">
+          <div class="order-page-size"><label for="orderPageSize">每頁顯示</label><select id="orderPageSize"><option value="10" selected>10 筆</option><option value="30">30 筆</option><option value="50">50 筆</option><option value="100">100 筆</option></select></div>
+          <span id="orderPaginationInfo" class="order-pagination-info">共 0 筆資料</span>
+          <div class="order-page-buttons"><button id="orderPrevPage" type="button" class="btn btn-outline" disabled>上一頁</button><button id="orderNextPage" type="button" class="btn btn-outline" disabled>下一頁</button></div>
+        </div>
         <p class="hint">首次使用前，請先在 Supabase SQL Editor 執行專案附帶的 <code>seller-orders-schema.sql</code>。重複匯入相同訂單會更新原資料，不會重複累加。</p>
       </section>
 

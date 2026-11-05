@@ -2,6 +2,7 @@
   const $ = id => document.getElementById(id);
   const state = { categories: [], products: [], session: null, selectedFiles: [], existingImages: [], galleryItems: [], variants: [] };
   const client = () => window.supabaseClient;
+  let orderCurrentPage = 1;
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
   function escapeHtml(value) {
@@ -354,11 +355,18 @@
   function parseSellerItem(raw) {
     const value = String(raw || "").trim();
     const parts = value.split(",");
-    const product = (parts.shift() || value).trim();
+    const productDetail = (parts.shift() || value).trim();
     const spec = parts.join(",");
     const sizeMatch = spec.match(/尺寸\s*[-：:]\s*([^,，]+)/i) || value.match(/尺寸\s*[-：:]\s*([^,，]+)/i);
-    const colorMatch = spec.match(/顏色\s*[-：:]\s*([^,，]+)/i) || product.match(/[-－]\s*(水洗黑|水洗灰|黑色|白色|米白|灰色|藍色|粉色|奶茶色)\s*$/i);
-    return { product_name: product, size: sizeMatch ? sizeMatch[1].trim() : "", color: colorMatch ? colorMatch[1].trim() : "" };
+    const colorMatch = spec.match(/顏色\s*[-：:]\s*([^,，]+)/i) || productDetail.match(/[-－]\s*(水洗黑|水洗灰|黑色|白色|米白|灰色|藍色|粉色|奶茶色)\s*$/i);
+    // The first phrase is the storefront style name; the remaining phrase
+    // describes the design/print and must not create another product style.
+    const productStyle = productDetail.split(/\s+/)[0] || productDetail;
+    return {
+      product_name: productStyle,
+      size: sizeMatch ? sizeMatch[1].trim() : "",
+      color: colorMatch ? colorMatch[1].trim() : ""
+    };
   }
   function isCancelledStatus(status) {
     return /取消|退貨|退款|作廢|未成立/i.test(String(status || ""));
@@ -514,24 +522,57 @@
       btn.disabled = false;
     }
   }
-  async function loadSellerOrderStats() {
-    const {data,error}=await client().from("seller_order_lines").select("external_order_id,order_status,product_name,size,color,quantity");
+  async function loadSellerOrderStats(resetPage = true) {
+    if (resetPage) orderCurrentPage = 1;
+    const {data,error}=await client().from("seller_order_lines")
+      .select("external_order_id,order_status,product_name,size,color,quantity");
     if(error) { $("orderImportStatus").textContent="訂單統計載入失敗："+error.message; return; }
-    const all=data||[], active=$("orderStatusFilter").value!=="all"?all.filter(x=>!isCancelledStatus(x.order_status)):all;
+
+    const all=data||[];
+    const active=$("orderStatusFilter").value!=="all"
+      ? all.filter(x=>!isCancelledStatus(x.order_status))
+      : all;
     const search=($("orderSearch").value||"").trim().toLowerCase();
     const grouped=new Map(), orders=new Set(), products=new Set();
     let units=0;
+
     for(const x of active) {
-      orders.add(x.external_order_id); products.add(x.product_name); units+=Number(x.quantity||0);
+      orders.add(x.external_order_id);
+      products.add(x.product_name);
+      units+=Number(x.quantity||0);
       const key=[x.product_name,x.size||"未標示",x.color||"未標示"].join("||");
-      const g=grouped.get(key)||{product:x.product_name,size:x.size||"—",color:x.color||"—",quantity:0,orders:new Set()};
-      g.quantity+=Number(x.quantity||0);g.orders.add(x.external_order_id);grouped.set(key,g);
+      const g=grouped.get(key)||{
+        product:x.product_name,size:x.size||"—",color:x.color||"—",
+        quantity:0,orders:new Set()
+      };
+      g.quantity+=Number(x.quantity||0);
+      g.orders.add(x.external_order_id);
+      grouped.set(key,g);
     }
+
     $("orderCount").textContent=orders.size.toLocaleString();
     $("orderUnits").textContent=units.toLocaleString();
     $("orderProductCount").textContent=products.size.toLocaleString();
-    const rows=[...grouped.values()].filter(g=>`${g.product} ${g.size} ${g.color}`.toLowerCase().includes(search)).sort((a,b)=>b.quantity-a.quantity);
-    $("orderStatsRows").innerHTML=rows.length?rows.map(g=>`<tr><td>${escapeHtml(g.product)}</td><td>${escapeHtml(g.size)}</td><td>${escapeHtml(g.color)}</td><td><strong>${g.quantity}</strong></td><td>${g.orders.size}</td></tr>`).join(""):`<tr><td colspan="5">沒有符合的訂單資料</td></tr>`;
+
+    const rows=[...grouped.values()]
+      .filter(g=>`${g.product} ${g.size} ${g.color}`.toLowerCase().includes(search))
+      .sort((a,b)=>b.quantity-a.quantity || a.product.localeCompare(b.product,"zh-Hant"));
+
+    const pageSize = Number($("orderPageSize").value) || 10;
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    orderCurrentPage = Math.min(Math.max(1, orderCurrentPage), totalPages);
+    const startIndex = (orderCurrentPage - 1) * pageSize;
+    const pageRows = rows.slice(startIndex, startIndex + pageSize);
+
+    $("orderStatsRows").innerHTML=pageRows.length
+      ? pageRows.map(g=>`<tr><td>${escapeHtml(g.product)}</td><td>${escapeHtml(g.size)}</td><td>${escapeHtml(g.color)}</td><td><strong>${g.quantity}</strong></td><td>${g.orders.size}</td></tr>`).join("")
+      : `<tr><td colspan="5">沒有符合的訂單資料</td></tr>`;
+
+    $("orderPaginationInfo").textContent = rows.length
+      ? `顯示 ${startIndex + 1}–${Math.min(startIndex + pageSize, rows.length)} 筆，共 ${rows.length} 筆｜第 ${orderCurrentPage} / ${totalPages} 頁`
+      : "共 0 筆資料";
+    $("orderPrevPage").disabled = orderCurrentPage <= 1;
+    $("orderNextPage").disabled = orderCurrentPage >= totalPages;
   }
 
   function wireEvents() {
@@ -541,8 +582,17 @@
       if(file) $("orderImportStatus").textContent=`已選擇：${file.name}`;
     });
     $("importSellerOrdersBtn").addEventListener("click", importSellerOrders);
-    $("orderSearch").addEventListener("input", loadSellerOrderStats);
-    $("orderStatusFilter").addEventListener("change", loadSellerOrderStats);
+    $("orderSearch").addEventListener("input", () => loadSellerOrderStats(true));
+    $("orderStatusFilter").addEventListener("change", () => loadSellerOrderStats(true));
+    $("orderPageSize").addEventListener("change", () => loadSellerOrderStats(true));
+    $("orderPrevPage").addEventListener("click", () => {
+      orderCurrentPage = Math.max(1, orderCurrentPage - 1);
+      loadSellerOrderStats(false);
+    });
+    $("orderNextPage").addEventListener("click", () => {
+      orderCurrentPage += 1;
+      loadSellerOrderStats(false);
+    });
     $("logoutBtn").addEventListener("click", handleLogout);
     $("categoryForm").addEventListener("submit", createCategory);
     $("productForm").addEventListener("submit", saveProduct);
