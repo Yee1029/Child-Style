@@ -371,7 +371,10 @@
     const cellText = (sheet, row, col) => {
       const address = XLSX.utils.encode_cell({ r: row, c: col });
       const cell = sheet[address];
-      return cell ? String(cell.w ?? cell.v ?? "").trim() : "";
+      if (!cell) return "";
+      // Prefer the underlying Excel value; formatted text may be empty or misleading.
+      const value = cell.v ?? cell.w ?? "";
+      return String(value).replace(/[\\r\\n]+/g, " ").trim();
     };
 
     const names = ["非訂單匯入", ...book.SheetNames.filter(n => n !== "非訂單匯入")];
