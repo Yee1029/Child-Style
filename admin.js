@@ -368,62 +368,65 @@
     const buffer = await file.arrayBuffer();
     const book = XLSX.read(buffer, { type: "array", cellDates: false, dense: false });
     const normalize = value => String(value ?? "").replace(/[\s\u3000\uFEFF]+/g, "").trim();
+    const cellText = (sheet, row, col) => {
+      const address = XLSX.utils.encode_cell({ r: row, c: col });
+      const cell = sheet[address];
+      return cell ? String(cell.w ?? cell.v ?? "").trim() : "";
+    };
 
-    // 此賣貨便匯出格式的實際商品明細在「非訂單匯入」。
-    // 固定優先使用該工作表，避免誤選只有欄位模板的「訂單匯入」。
-    const preferredNames = ["非訂單匯入", ...book.SheetNames.filter(n => n !== "非訂單匯入")];
+    const names = ["非訂單匯入", ...book.SheetNames.filter(n => n !== "非訂單匯入")];
     let selected = null;
-    for (const sheetName of preferredNames) {
+    for (const sheetName of names) {
       const sheet = book.Sheets[sheetName];
-      if (!sheet) continue;
-      // 不設定 blankrows:false，保留 Excel 原始列位置，方便穩定產生明細鍵。
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
-      const headerIndex = rows.findIndex(row => {
-        const cells = row.map(normalize);
-        return cells.some(v => v.includes("訂單編號")) &&
-          cells.some(v => v.includes("商品名稱") || v.includes("品名/規格")) &&
-          cells.some(v => v === "數量" || v.includes("數量"));
-      });
-      if (headerIndex < 0) continue;
-      const headers = rows[headerIndex].map(normalize);
-      const findCol = (...names) => headers.findIndex(h => names.some(n => h.includes(n)));
-      const idx = {
-        order: findCol("訂單編號"),
-        date: findCol("訂購日期"),
-        status: findCol("狀態"),
-        item: findCol("商品名稱", "品名/規格"),
-        qty: findCol("數量"),
-        price: findCol("優惠價", "單價"),
-        recipient: findCol("收件人姓名")
-      };
-      if (idx.order >= 0 && idx.item >= 0 && idx.qty >= 0) {
-        selected = { sheetName, rows, headerIndex, idx };
-        // 非訂單匯入為首選；若它存在標題列，即使資料列有問題也回報該表錯誤，
-        // 不要靜默切換到另一張不含商品資料的模板表。
+      if (!sheet || !sheet["!ref"]) continue;
+      const range = XLSX.utils.decode_range(sheet["!ref"]);
+      let headerRow = -1, columns = null;
+      for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 30); r++) {
+        const rowValues = [];
+        for (let c = range.s.c; c <= range.e.c; c++) rowValues.push(normalize(cellText(sheet, r, c)));
+        const find = (...keys) => rowValues.findIndex(v => keys.some(k => v.includes(k)));
+        const order = find("訂單編號");
+        const item = find("商品名稱", "品名/規格");
+        const qty = find("數量");
+        if (order >= 0 && item >= 0 && qty >= 0) {
+          headerRow = r;
+          columns = {
+            order: range.s.c + order,
+            item: range.s.c + item,
+            qty: range.s.c + qty,
+            date: range.s.c + find("訂購日期"),
+            status: range.s.c + find("狀態"),
+            price: range.s.c + find("優惠價", "單價"),
+            recipient: range.s.c + find("收件人姓名")
+          };
+          break;
+        }
+      }
+      if (headerRow >= 0) {
+        selected = { sheetName, sheet, range, headerRow, columns };
         if (sheetName === "非訂單匯入") break;
       }
     }
-    if (!selected) throw new Error("找不到賣貨便訂單明細欄位。請確認上傳的是「訂單資訊」Excel。");
+    if (!selected) throw new Error("找不到訂單編號、商品名稱及數量欄位。請確認賣貨便 Excel 格式。");
 
-    const { rows, headerIndex, idx, sheetName } = selected;
+    const { sheetName, sheet, range, headerRow, columns: c } = selected;
     let currentOrder = "", currentDate = "", currentStatus = "", currentRecipient = "";
     const output = [];
-    for (let r = headerIndex + 1; r < rows.length; r++) {
-      const row = rows[r] || [];
-      const orderCell = String(row[idx.order] ?? "").trim();
+    for (let r = headerRow + 1; r <= range.e.r; r++) {
+      const orderCell = cellText(sheet, r, c.order);
       if (orderCell) {
         currentOrder = orderCell;
-        currentDate = idx.date >= 0 ? String(row[idx.date] ?? "") : "";
-        currentStatus = idx.status >= 0 ? String(row[idx.status] ?? "").replace(/\s+/g, " ").trim() : "";
-        currentRecipient = idx.recipient >= 0 ? String(row[idx.recipient] ?? "") : "";
+        currentDate = c.date >= 0 ? cellText(sheet, r, c.date) : "";
+        currentStatus = c.status >= 0 ? cellText(sheet, r, c.status).replace(/\s+/g, " ").trim() : "";
+        currentRecipient = c.recipient >= 0 ? cellText(sheet, r, c.recipient) : "";
       }
-      const itemRaw = String(row[idx.item] ?? "").trim();
+      const itemRaw = cellText(sheet, r, c.item);
       if (!currentOrder || !itemRaw) continue;
-      const parsed = parseSellerItem(itemRaw);
-      const quantityText = String(row[idx.qty] ?? "").replace(/,/g, "").trim();
-      const quantity = Number(quantityText);
+      const qtyRaw = cellText(sheet, r, c.qty).replace(/,/g, "").trim();
+      const quantity = Number(qtyRaw);
       if (!Number.isFinite(quantity) || quantity <= 0) continue;
-      const priceText = idx.price >= 0 ? String(row[idx.price] ?? "").replace(/,/g, "").trim() : "";
+      const parsed = parseSellerItem(itemRaw);
+      const priceRaw = c.price >= 0 ? cellText(sheet, r, c.price).replace(/,/g, "").trim() : "";
       output.push({
         external_order_id: currentOrder,
         line_key: `${sheetName}-${r + 1}`,
@@ -435,12 +438,13 @@
         size: parsed.size,
         color: parsed.color,
         quantity,
-        unit_price: Number(priceText) || 0,
+        unit_price: Number(priceRaw) || 0,
         source_file: file.name
       });
     }
     if (!output.length) {
-      throw new Error(`已讀取「${sheetName}」工作表，但商品明細仍為 0 筆。系統已辨識標題列第 ${headerIndex + 1} 列；請回報此訊息，我會再依實際欄位位置修正。`);
+      const colLetters = Object.fromEntries(Object.entries(c).map(([k,v]) => [k, v >= 0 ? XLSX.utils.encode_col(v) : "未找到"]));
+      throw new Error(`已讀取「${sheetName}」工作表，但商品明細為 0 筆。欄位定位：訂單=${colLetters.order}、商品=${colLetters.item}、數量=${colLetters.qty}。`);
     }
     return output;
   }
