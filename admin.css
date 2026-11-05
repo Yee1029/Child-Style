@@ -34,3 +34,12 @@
 .variant-table-wrap #variantRows .variant-row input{width:100%;min-width:0}
 .variant-remove{width:36px;height:40px;border:1px solid #eadfd5;background:#fff;border-radius:5px;font-size:22px;color:#8b6255;cursor:pointer}
 @media(max-width:640px){.variant-heading{flex-direction:column}}
+
+/* V2.0 gallery editor: remove and reorder photos */
+.gallery-edit-item{position:relative;width:124px;padding:7px;background:#fff;border:1px solid #e6d8ce;border-radius:7px;cursor:grab}
+.gallery-edit-item:active{cursor:grabbing}
+.gallery-edit-item img{width:108px;height:112px;object-fit:contain;background:#f7f4ef;border-radius:4px}
+.gallery-item-actions{display:flex;gap:4px;justify-content:center;flex-wrap:wrap}
+.gallery-item-actions button{border:1px solid #e2d4c9;background:#fffaf4;border-radius:4px;padding:4px 7px;font-size:11px;cursor:pointer;color:#5a443b}
+.gallery-item-actions button[data-gallery-remove]{color:#a33b32}
+.gallery-item-actions button:disabled{opacity:.35;cursor:not-allowed}

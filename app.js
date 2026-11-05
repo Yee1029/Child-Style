@@ -58,6 +58,7 @@ async function loadProducts(){
  }catch(error){console.error(error);status.textContent="商品資料載入失敗，請檢查資料庫欄位與權限。";$("emptyState").hidden=false;$("emptyState").textContent="目前無法載入商品，請確認管理員已執行新版資料庫欄位 SQL。";}
 }
 document.addEventListener("click",event=>{
+ const zoom=event.target.closest(".main-image-zoom"); if(zoom){openLightbox(activeLightboxIndex);return;}
  const thumb=event.target.closest("[data-gallery-index]"); if(thumb&&activeGalleryProduct){const i=Number(thumb.dataset.galleryIndex);const im=activeGalleryProduct.images[i];if(im){setGalleryImage(im.image_url,activeGalleryProduct.name,i);document.querySelectorAll(".gallery-thumb").forEach((b,j)=>b.classList.toggle("active",j===i));}return;}
  const productCard=event.target.closest("[data-product-id]");if(productCard)openProduct(productCard.dataset.productId);
  const categoryLink=event.target.closest("[data-category-link]");if(categoryLink){activeCategory=categoryLink.dataset.categoryLink;document.querySelectorAll(".pill").forEach(p=>p.classList.toggle("active",p.dataset.category===activeCategory));renderAll();}

@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { categories: [], products: [], session: null, selectedFiles: [], variants: [] };
+  const state = { categories: [], products: [], session: null, selectedFiles: [], existingImages: [], galleryItems: [], variants: [] };
   const client = () => window.supabaseClient;
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
@@ -168,6 +168,8 @@
     $("galleryPreview").innerHTML = "<span>尚未選擇商品照片</span>";
     $("productImages").value = "";
     state.selectedFiles = [];
+    state.existingImages = [];
+    state.galleryItems = [];
     renderVariantRows([]);
     setMessage("formMessage", "");
   }
@@ -189,10 +191,11 @@
     $("isBestseller").checked = !!p.is_bestseller;
     renderVariantRows((p.product_variants || []).filter(v => v.is_active !== false).sort((a,b) => Number(a.sort_order||0)-Number(b.sort_order||0)).map(v => ({size:v.size,color:v.color,note:""})));
     const imgs = (p.product_images || []).slice().sort((a,b) => Number(b.is_primary)-Number(a.is_primary) || a.sort_order-b.sort_order);
-    const gallery = imgs;
+    state.existingImages = imgs.map(im => ({...im}));
     state.selectedFiles = [];
+    state.galleryItems = state.existingImages.map(im => ({kind:"existing", id:im.id, url:im.image_url, image:im}));
     $("productImages").value = "";
-    $("galleryPreview").innerHTML = gallery.length ? gallery.map((im,i)=>`<div class="preview-item"><img src="${escapeHtml(im.image_url)}" alt="商品圖片 ${i+1}"><small>${im.image_type==="size_chart"?"尺寸表":`照片 ${i+1}`}</small></div>`).join("") : "<span>尚未設定商品照片</span>";
+    renderGalleryPreview();
     $("editorTitle").textContent = "編輯商品";
     $("saveProductBtn").textContent = "儲存修改";
     setMessage("formMessage", "已載入商品，可直接修改。", "success");
@@ -263,18 +266,32 @@
         if (variantInsertError) throw variantInsertError;
       }
 
-      // Append all newly selected gallery photos; keep existing photos intact.
-      const { data: existingGallery, error: galleryReadError } = await client().from("product_images")
-        .select("id,sort_order,is_primary,image_type").eq("product_id", productId).eq("image_type", "gallery").order("sort_order", { ascending: true });
-      if (galleryReadError) throw galleryReadError;
-      let nextOrder = (existingGallery || []).reduce((m, im) => Math.max(m, Number(im.sort_order || 0)), -1) + 1;
-      for (let i = 0; i < state.selectedFiles.length; i++) {
-        const imageUrl = await uploadImage(state.selectedFiles[i], productId, "gallery");
-        const isPrimary = (existingGallery || []).length === 0 && i === 0;
-        const { error } = await client().from("product_images").insert({
-          product_id: productId, image_url: imageUrl, alt_text: `${name} 商品照片 ${nextOrder + 1}`,
-          is_primary: isPrimary, sort_order: nextOrder++, image_type: "gallery"
-        });
+      // Persist the ordered gallery: retain existing rows, add newly uploaded files, and update sort order.
+      const orderedItems = state.galleryItems.slice();
+      const existingIds = orderedItems.filter(x => x.kind === "existing").map(x => x.id);
+      const removed = state.existingImages.filter(im => !existingIds.includes(im.id));
+      for (const im of removed) {
+        const { error } = await client().from("product_images").delete().eq("id", im.id).eq("product_id", productId);
+        if (error) throw error;
+      }
+      const finalRows = [];
+      for (const item of orderedItems) {
+        if (item.kind === "existing") {
+          finalRows.push({ id:item.id, image_url:item.url, image_type:item.image?.image_type || "gallery" });
+        } else if (item.kind === "new") {
+          const imageUrl = await uploadImage(item.file, productId, "gallery");
+          const { data, error } = await client().from("product_images").insert({
+            product_id: productId, image_url: imageUrl, alt_text: `${name} 商品照片`,
+            is_primary: false, sort_order: finalRows.length, image_type: "gallery"
+          }).select("id").single();
+          if (error) throw error;
+          finalRows.push({ id:data.id, image_url:imageUrl, image_type:"gallery" });
+        }
+      }
+      for (let i = 0; i < finalRows.length; i++) {
+        const { error } = await client().from("product_images").update({
+          sort_order:i, is_primary:i===0
+        }).eq("id", finalRows[i].id).eq("product_id", productId);
         if (error) throw error;
       }
       setMessage("formMessage", "儲存成功！", "success");
@@ -299,12 +316,37 @@
     globalMessage(status === "published" ? "商品已上架。" : "商品已轉為草稿。", "success");
     await loadProducts();
   }
+  function renderGalleryPreview() {
+    const items = state.galleryItems || [];
+    $("galleryPreview").innerHTML = items.length ? items.map((item,i)=>`
+      <div class="preview-item gallery-edit-item" draggable="true" data-gallery-index="${i}">
+        <img src="${escapeHtml(item.kind==="existing" ? item.url : item.previewUrl)}" alt="商品照片 ${i+1}">
+        <small>${i===0?"主圖":`照片 ${i+1}`}${item.kind==="new"?" · 待上傳":""}</small>
+        <div class="gallery-item-actions">
+          <button type="button" data-gallery-move="-1" ${i===0?"disabled":""} aria-label="照片往前">↑</button>
+          <button type="button" data-gallery-move="1" ${i===items.length-1?"disabled":""} aria-label="照片往後">↓</button>
+          <button type="button" data-gallery-remove aria-label="刪除照片">刪除</button>
+        </div>
+      </div>`).join("") : "<span>尚未設定商品照片</span>";
+  }
   function previewGalleryFiles(files) {
-    state.selectedFiles = Array.from(files || []);
-    if (state.selectedFiles.some(f => !["image/jpeg","image/png","image/webp"].includes(f.type) || f.size > 5*1024*1024)) {
-      state.selectedFiles = []; setMessage("formMessage", "請選擇 JPG、PNG、WebP，且每張圖片不得超過 5MB。", "error"); return;
+    const picked = Array.from(files || []);
+    if (picked.some(f => !["image/jpeg","image/png","image/webp"].includes(f.type) || f.size > 5*1024*1024)) {
+      setMessage("formMessage", "請選擇 JPG、PNG、WebP，且每張圖片不得超過 5MB。", "error"); return;
     }
-    $("galleryPreview").innerHTML = state.selectedFiles.length ? state.selectedFiles.map((f,i)=>`<div class="preview-item"><img src="${URL.createObjectURL(f)}" alt="預覽 ${i+1}"><small>${i===0?"本次第一張":"照片 "+(i+1)}</small></div>`).join("") : "<span>尚未選擇新照片</span>";
+    for (const file of picked) {
+      state.selectedFiles.push(file);
+      state.galleryItems.push({kind:"new", file, previewUrl:URL.createObjectURL(file)});
+    }
+    $("productImages").value = "";
+    renderGalleryPreview();
+  }
+  function moveGalleryItem(index, step) {
+    const target = index + step;
+    if (target < 0 || target >= state.galleryItems.length) return;
+    const [item] = state.galleryItems.splice(index,1);
+    state.galleryItems.splice(target,0,item);
+    renderGalleryPreview();
   }
   function wireEvents() {
     $("loginForm").addEventListener("submit", handleLogin);
@@ -313,6 +355,38 @@
     $("productForm").addEventListener("submit", saveProduct);
     $("resetFormBtn").addEventListener("click", resetForm);
     $("productImages").addEventListener("change", e => previewGalleryFiles(e.target.files));
+    $("galleryPreview").addEventListener("click", e => {
+      const card = e.target.closest("[data-gallery-index]");
+      if (!card) return;
+      const index = Number(card.dataset.galleryIndex);
+      if (e.target.closest("[data-gallery-remove]")) {
+        const item = state.galleryItems[index];
+        if (item?.kind === "new") URL.revokeObjectURL(item.previewUrl);
+        state.galleryItems.splice(index,1);
+        renderGalleryPreview();
+      } else {
+        const move = e.target.closest("[data-gallery-move]");
+        if (move) moveGalleryItem(index, Number(move.dataset.galleryMove));
+      }
+    });
+    let draggedGalleryIndex = null;
+    $("galleryPreview").addEventListener("dragstart", e => {
+      const card = e.target.closest("[data-gallery-index]");
+      if (!card) return;
+      draggedGalleryIndex = Number(card.dataset.galleryIndex);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    $("galleryPreview").addEventListener("dragover", e => { if (e.target.closest("[data-gallery-index]")) e.preventDefault(); });
+    $("galleryPreview").addEventListener("drop", e => {
+      const card = e.target.closest("[data-gallery-index]");
+      if (!card || draggedGalleryIndex === null) return;
+      e.preventDefault();
+      const to = Number(card.dataset.galleryIndex);
+      const [item] = state.galleryItems.splice(draggedGalleryIndex,1);
+      state.galleryItems.splice(to,0,item);
+      draggedGalleryIndex = null;
+      renderGalleryPreview();
+    });
     $("addVariantBtn").addEventListener("click", () => variantRow());
     $("variantRows").addEventListener("click", e => {
       const remove = e.target.closest(".variant-remove");
