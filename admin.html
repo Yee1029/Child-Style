@@ -51,6 +51,29 @@
         <article class="stat-card"><span>草稿</span><strong id="draftCount">—</strong></article>
       </div>
 
+      <section class="panel orders-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">SELLER ORDER ANALYTICS</p><h2>賣貨便訂單統計</h2><p class="hint">匯入賣貨便「訂單資訊」Excel，自動累積商品、尺寸、顏色與件數。</p></div>
+        </div>
+        <div class="order-import-row">
+          <label class="order-upload" for="sellerOrderFile"><strong>＋ 選擇賣貨便 Excel</strong><span>支援 .xlsx / .xls，依照你提供的訂單資訊格式</span></label>
+          <input id="sellerOrderFile" type="file" accept=".xlsx,.xls" hidden>
+          <button id="importSellerOrdersBtn" type="button" class="btn btn-dark" disabled>匯入訂單</button>
+          <span id="orderImportStatus" class="message" role="status"></span>
+        </div>
+        <div class="order-stats-grid">
+          <article class="stat-card"><span>訂單筆數</span><strong id="orderCount">0</strong></article>
+          <article class="stat-card"><span>訂購件數</span><strong id="orderUnits">0</strong></article>
+          <article class="stat-card"><span>商品款式</span><strong id="orderProductCount">0</strong></article>
+        </div>
+        <div class="order-filter-row">
+          <input id="orderSearch" type="search" placeholder="搜尋商品名稱、尺寸或顏色">
+          <select id="orderStatusFilter"><option value="active">有效訂單（排除取消）</option><option value="all">全部狀態</option></select>
+        </div>
+        <div class="order-table-wrap"><table class="order-table"><thead><tr><th>商品</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>訂單數</th></tr></thead><tbody id="orderStatsRows"><tr><td colspan="5">尚未匯入訂單</td></tr></tbody></table></div>
+        <p class="hint">首次使用前，請先在 Supabase SQL Editor 執行專案附帶的 <code>seller-orders-schema.sql</code>。重複匯入相同訂單會更新原資料，不會重複累加。</p>
+      </section>
+
       <div class="admin-layout">
         <section class="panel product-editor">
           <div class="panel-heading">
@@ -163,6 +186,7 @@
   <footer class="footer"><span>Child Style</span><span>ADMIN PANEL · KEEP YOUR KEYS PRIVATE</span></footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
   <script src="admin.js"></script>

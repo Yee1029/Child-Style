@@ -71,6 +71,7 @@
   }
   async function loadEverything() {
     await Promise.all([loadCategories(), loadProducts()]);
+    loadSellerOrderStats();
   }
   async function loadCategories() {
     const { data, error } = await client().from("categories")
@@ -348,8 +349,95 @@
     state.galleryItems.splice(target,0,item);
     renderGalleryPreview();
   }
+
+  let parsedSellerOrders = [];
+  function parseSellerItem(raw) {
+    const value = String(raw || "").trim();
+    const parts = value.split(",");
+    const product = (parts.shift() || value).trim();
+    const spec = parts.join(",");
+    const sizeMatch = spec.match(/尺寸\s*[-：:]\s*([^,，]+)/i) || value.match(/尺寸\s*[-：:]\s*([^,，]+)/i);
+    const colorMatch = spec.match(/顏色\s*[-：:]\s*([^,，]+)/i) || product.match(/[-－]\s*(水洗黑|水洗灰|黑色|白色|米白|灰色|藍色|粉色|奶茶色)\s*$/i);
+    return { product_name: product, size: sizeMatch ? sizeMatch[1].trim() : "", color: colorMatch ? colorMatch[1].trim() : "" };
+  }
+  function isCancelledStatus(status) {
+    return /取消|退貨|退款|作廢|未成立/i.test(String(status || ""));
+  }
+  async function readSellerExcel(file) {
+    if (!window.XLSX) throw new Error("Excel 解析元件載入失敗，請重新整理後再試。");
+    const buffer = await file.arrayBuffer();
+    const book = XLSX.read(buffer, {type:"array", cellDates:false});
+    const sheet = book.Sheets["非訂單匯入"] || book.Sheets[book.SheetNames[0]];
+    if (!sheet) throw new Error("找不到訂單工作表。");
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:"", raw:false});
+    const headerIndex = rows.findIndex(row => row.some(v => String(v).includes("訂單編號")) && row.some(v => String(v).includes("商品名稱")));
+    if (headerIndex < 0) throw new Error("找不到「訂單編號」及「商品名稱」欄位，請確認是賣貨便訂單資訊 Excel。");
+    const headers = rows[headerIndex].map(v=>String(v).replace(/\s+/g,"").replace(/\n/g,""));
+    const col = name => headers.findIndex(v=>v.includes(name));
+    const idx = {order:col("訂單編號"),date:col("訂購日期"),status:col("狀態"),item:col("商品名稱"),qty:col("數量"),price:col("優惠價"),recipient:col("收件人姓名")};
+    if (idx.order<0 || idx.item<0 || idx.qty<0) throw new Error("訂單表缺少必要欄位（訂單編號、商品名稱或數量）。");
+    let currentOrder="", currentDate="", currentStatus="", currentRecipient="", lineNo=0;
+    const output=[];
+    for (let r=headerIndex+1;r<rows.length;r++) {
+      const row=rows[r];
+      const order=String(row[idx.order]||"").trim();
+      if (order) { currentOrder=order; currentDate=String(row[idx.date]||""); currentStatus=String(row[idx.status]||"").replace(/\s+/g," ").trim(); currentRecipient=String(row[idx.recipient]||""); lineNo=0; }
+      const itemRaw=String(row[idx.item]||"").trim();
+      if (!currentOrder || !itemRaw) continue;
+      const parsed=parseSellerItem(itemRaw);
+      const quantity=Math.max(0, Number(String(row[idx.qty]||"0").replace(/,/g,""))||0);
+      if (!quantity) continue;
+      output.push({external_order_id:currentOrder,line_key:String(lineNo++),order_date:currentDate,order_status:currentStatus,recipient:currentRecipient,product_name:parsed.product_name,raw_item_name:itemRaw,size:parsed.size,color:parsed.color,quantity,unit_price:Number(String(row[idx.price]||"0").replace(/,/g,""))||0,source_file:file.name});
+    }
+    if (!output.length) throw new Error("沒有找到可匯入的商品明細。");
+    return output;
+  }
+  async function importSellerOrders() {
+    const file=$("sellerOrderFile").files[0];
+    if (!file) return;
+    const btn=$("importSellerOrdersBtn"); btn.disabled=true;
+    $("orderImportStatus").textContent="正在讀取 Excel…";
+    try {
+      parsedSellerOrders=await readSellerExcel(file);
+      const {error}=await client().from("seller_order_lines").upsert(parsedSellerOrders,{onConflict:"external_order_id,line_key"});
+      if(error) throw error;
+      $("orderImportStatus").textContent=`成功匯入 ${parsedSellerOrders.length} 筆商品明細。`;
+      $("orderImportStatus").className="message success";
+      await loadSellerOrderStats();
+    } catch(err) {
+      $("orderImportStatus").textContent=err.message||"匯入失敗";
+      $("orderImportStatus").className="message error";
+    } finally {btn.disabled=false;}
+  }
+  async function loadSellerOrderStats() {
+    const {data,error}=await client().from("seller_order_lines").select("external_order_id,order_status,product_name,size,color,quantity");
+    if(error) { $("orderImportStatus").textContent="訂單統計載入失敗："+error.message; return; }
+    const all=data||[], active=$("orderStatusFilter").value!=="all"?all.filter(x=>!isCancelledStatus(x.order_status)):all;
+    const search=($("orderSearch").value||"").trim().toLowerCase();
+    const grouped=new Map(), orders=new Set(), products=new Set();
+    let units=0;
+    for(const x of active) {
+      orders.add(x.external_order_id); products.add(x.product_name); units+=Number(x.quantity||0);
+      const key=[x.product_name,x.size||"未標示",x.color||"未標示"].join("||");
+      const g=grouped.get(key)||{product:x.product_name,size:x.size||"—",color:x.color||"—",quantity:0,orders:new Set()};
+      g.quantity+=Number(x.quantity||0);g.orders.add(x.external_order_id);grouped.set(key,g);
+    }
+    $("orderCount").textContent=orders.size.toLocaleString();
+    $("orderUnits").textContent=units.toLocaleString();
+    $("orderProductCount").textContent=products.size.toLocaleString();
+    const rows=[...grouped.values()].filter(g=>`${g.product} ${g.size} ${g.color}`.toLowerCase().includes(search)).sort((a,b)=>b.quantity-a.quantity);
+    $("orderStatsRows").innerHTML=rows.length?rows.map(g=>`<tr><td>${escapeHtml(g.product)}</td><td>${escapeHtml(g.size)}</td><td>${escapeHtml(g.color)}</td><td><strong>${g.quantity}</strong></td><td>${g.orders.size}</td></tr>`).join(""):`<tr><td colspan="5">沒有符合的訂單資料</td></tr>`;
+  }
+
   function wireEvents() {
     $("loginForm").addEventListener("submit", handleLogin);
+    $("sellerOrderFile").addEventListener("change", async e => {
+      const file=e.target.files[0]; $("importSellerOrdersBtn").disabled=!file;
+      if(file) $("orderImportStatus").textContent=`已選擇：${file.name}`;
+    });
+    $("importSellerOrdersBtn").addEventListener("click", importSellerOrders);
+    $("orderSearch").addEventListener("input", loadSellerOrderStats);
+    $("orderStatusFilter").addEventListener("change", loadSellerOrderStats);
     $("logoutBtn").addEventListener("click", handleLogout);
     $("categoryForm").addEventListener("submit", createCategory);
     $("productForm").addEventListener("submit", saveProduct);
