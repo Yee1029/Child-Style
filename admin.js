@@ -3,6 +3,8 @@
   const state = { categories: [], products: [], session: null, selectedFiles: [], existingImages: [], galleryItems: [], variants: [] };
   const client = () => window.supabaseClient;
   let orderCurrentPage = 1;
+  let orderSortKey = "size";
+  let orderSortDirection = "asc";
   let profitTrendChart = null;
   let idleLogoutTimer = null;
   const IDLE_LOGOUT_MS = 30 * 60 * 1000;
@@ -641,9 +643,43 @@
     $("orderUnits").textContent=units.toLocaleString();
     $("orderProductCount").textContent=products.size.toLocaleString();
 
+    const sizeRank = value => {
+      const raw = String(value || "").trim().replace(/\\s+/g, "").toUpperCase();
+      const child = raw.match(/^(?:兒童|童裝|童)?(\\d{2,3})$/);
+      if (child) return { group: 0, value: Number(child[1]) };
+      const adult = ["S","M","L","XL","2L","3L","4L","5L","6L"];
+      const index = adult.indexOf(raw);
+      if (index >= 0) return { group: 1, value: index };
+      const numeric = raw.match(/^(\\d+(?:\\.\\d+)?)$/);
+      if (numeric) return { group: 0, value: Number(numeric[1]) };
+      return { group: 2, value: raw };
+    };
+    const compareSize = (a,b) => {
+      const x=sizeRank(a), y=sizeRank(b);
+      if (x.group !== y.group) return x.group-y.group;
+      if (typeof x.value === "number" && typeof y.value === "number") return x.value-y.value;
+      return String(x.value).localeCompare(String(y.value),"zh-Hant");
+    };
     const rows=[...grouped.values()]
-      .filter(g=>`${g.product} ${g.size} ${g.color}`.toLowerCase().includes(search))
-      .sort((a,b)=>b.quantity-a.quantity || a.product.localeCompare(b.product,"zh-Hant"));
+      .filter(g=>`${g.product} ${g.size} ${g.color}`.toLowerCase().includes(search));
+    rows.sort((a,b) => {
+      let result = 0;
+      if (orderSortKey === "size") result = compareSize(a.size,b.size);
+      else if (orderSortKey === "product") result = a.product.localeCompare(b.product,"zh-Hant");
+      else if (orderSortKey === "color") result = a.color.localeCompare(b.color,"zh-Hant");
+      else if (orderSortKey === "quantity") result = a.quantity-b.quantity;
+      else if (orderSortKey === "orders") result = a.orders.size-b.orders.size;
+      if (result === 0) result = compareSize(a.size,b.size) || a.color.localeCompare(b.color,"zh-Hant");
+      return orderSortDirection === "asc" ? result : -result;
+    });
+    document.querySelectorAll("[data-order-sort]").forEach(button => {
+      const key=button.dataset.orderSort;
+      const active=key===orderSortKey;
+      button.classList.toggle("active",active);
+      const marker=button.querySelector("span");
+      if(marker) marker.textContent=active?(orderSortDirection==="asc"?"↑":"↓"):"↕";
+      button.setAttribute("aria-label", `${button.textContent.trim()}，${active?(orderSortDirection==="asc"?"升冪":"降冪"):"點擊排序"}`);
+    });
 
     const pageSize = Number($("orderPageSize").value) || 10;
     const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -671,20 +707,33 @@
     if (Number.isNaN(d.getTime())) return "";
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   }
+  function normalizeProductMatch(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[\\s\\u3000\\-－_＿,，、.。:：()（）【】\\[\\]]/g, "");
+  }
   function findCostProduct(orderProductName, products) {
-    const target = String(orderProductName || "").trim();
+    const target = normalizeProductMatch(orderProductName);
     if (!target) return null;
-    const candidates = products.filter(p => {
-      const name = String(p.name || "").trim();
-      return name === target || name.startsWith(target) || target.startsWith(name);
-    });
-    candidates.sort((a,b) => String(b.name || "").length - String(a.name || "").length);
-    return candidates[0] || null;
+    const candidates = products.map(product => {
+      const name = normalizeProductMatch(product.name);
+      let score = 0;
+      if (!name) return { product, score: 0 };
+      if (name === target) score = 1000 + name.length;
+      else if (target.startsWith(name)) score = 800 + name.length;
+      else if (name.startsWith(target)) score = 700 + target.length;
+      else if (target.includes(name)) score = 500 + name.length;
+      else if (name.includes(target)) score = 400 + target.length;
+      return { product, score };
+    }).filter(item => item.score > 0);
+    candidates.sort((a,b) => b.score-a.score);
+    return candidates[0]?.product || null;
   }
   async function loadProfitAnalytics() {
     $("profitMatchMessage").textContent = "正在讀取訂單與商品成本…";
     const [{ data: orderRows, error: orderError }, { data: productRows, error: productError }] = await Promise.all([
-      client().from("seller_order_lines").select("external_order_id,order_date,order_status,product_name,quantity,unit_price"),
+      client().from("seller_order_lines").select("external_order_id,order_date,order_status,product_name,raw_item_name,quantity,unit_price"),
       client().from("products").select("id,name,price,compare_at_price")
     ]);
     if (orderError || productError) {
@@ -700,7 +749,8 @@
       const qty = Number(row.quantity || 0);
       const salePrice = Number(row.unit_price || 0);
       if (!(qty > 0)) continue;
-      const product = findCostProduct(row.product_name, products);
+      const product = findCostProduct(row.product_name, products)
+        || findCostProduct(row.raw_item_name, products);
       if (!product || product.compare_at_price === null || product.compare_at_price === undefined || product.compare_at_price === "") {
         unmatchedLines++;
         continue;
@@ -753,8 +803,9 @@
       $("profitMatchMessage").textContent = "折線圖元件未載入，請確認網路可連線至 Chart.js。";
       return;
     }
+    const productCostSummary = products.map(p => `${p.name}：${p.compare_at_price ?? "未填成本"}`).join("；");
     $("profitMatchMessage").textContent =
-      `已比對 ${matchedLines} 筆商品明細；${unmatchedLines} 筆找不到商品成本或商品名稱，未納入營利；排除取消訂單 ${excludedLines} 筆。每日營利依訂單日期彙總。`;
+      `已比對 ${matchedLines} 筆商品明細；${unmatchedLines} 筆找不到商品或未填成本；排除取消訂單 ${excludedLines} 筆。商品成本讀取結果：${productCostSummary || "商品清單為空"}。每日營利依訂單日期彙總。`;
   }
 
   function wireEvents() {
@@ -801,6 +852,14 @@
       if(file) $("orderImportStatus").textContent=`已選擇：${file.name}`;
     });
     $("importSellerOrdersBtn").addEventListener("click", importSellerOrders);
+    document.querySelectorAll("[data-order-sort]").forEach(button => {
+      button.addEventListener("click", () => {
+        const key=button.dataset.orderSort;
+        if(orderSortKey===key) orderSortDirection=orderSortDirection==="asc"?"desc":"asc";
+        else { orderSortKey=key; orderSortDirection="asc"; }
+        loadSellerOrderStats(true);
+      });
+    });
     $("orderSearch").addEventListener("input", () => loadSellerOrderStats(true));
     $("orderStatusFilter").addEventListener("change", () => loadSellerOrderStats(true));
     $("orderPageSize").addEventListener("change", () => loadSellerOrderStats(true));
