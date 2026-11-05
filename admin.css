@@ -189,3 +189,12 @@ body.modal-open{overflow:hidden}
 .order-sort-button.active{color:#7f5141;font-weight:700}
 .order-sort-button.active span{opacity:1}
 .order-sort-button:hover{color:#9a6250}
+
+.profit-detail-heading{margin:24px 0 10px}
+.profit-detail-heading h3{margin:0 0 5px;color:var(--ink);font-size:16px}
+.profit-detail-heading p{margin:0;color:var(--muted);font-size:12px}
+.profit-detail-table-wrap{width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+.profit-detail-table{width:100%;min-width:1050px;border-collapse:collapse;font-size:12px}
+.profit-detail-table th,.profit-detail-table td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.profit-detail-table th{background:#faf3ed;color:#8a6c5f;font-weight:600}
+.profit-detail-table tr:last-child td{border-bottom:0}

@@ -707,28 +707,29 @@
     if (Number.isNaN(d.getTime())) return "";
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   }
-  function normalizeProductMatch(value) {
-    return String(value || "")
-      .normalize("NFKC")
-      .toLowerCase()
-      .replace(/[\\s\\u3000\\-－_＿,，、.。:：()（）【】\\[\\]]/g, "");
+  function cleanProductName(value) {
+    return String(value || "").normalize("NFKC").trim();
   }
-  function findCostProduct(orderProductName, products) {
-    const target = normalizeProductMatch(orderProductName);
-    if (!target) return null;
-    const candidates = products.map(product => {
-      const name = normalizeProductMatch(product.name);
-      let score = 0;
-      if (!name) return { product, score: 0 };
-      if (name === target) score = 1000 + name.length;
-      else if (target.startsWith(name)) score = 800 + name.length;
-      else if (name.startsWith(target)) score = 700 + target.length;
-      else if (target.includes(name)) score = 500 + name.length;
-      else if (name.includes(target)) score = 400 + target.length;
-      return { product, score };
-    }).filter(item => item.score > 0);
-    candidates.sort((a,b) => b.score-a.score);
-    return candidates[0]?.product || null;
+  function findCostProduct(orderRow, products) {
+    const styleName = cleanProductName(orderRow.product_name);
+    // Rule 1: the imported product style must exactly equal products.name.
+    let match = products.find(product => cleanProductName(product.name) === styleName);
+    if (match) return match;
+
+    // Rule 2: use the original Excel item text. The product's exact name must
+    // be the leading phrase; the next character must be a separator, not
+    // merely a partial-word match.
+    const raw = cleanProductName(orderRow.raw_item_name);
+    if (!raw) return null;
+    const candidates = products
+      .filter(product => {
+        const name = cleanProductName(product.name);
+        if (!name || !raw.startsWith(name)) return false;
+        const next = raw.slice(name.length, name.length + 1);
+        return next === "" || /[\s,，、\-－_＿]/.test(next);
+      })
+      .sort((a,b) => cleanProductName(b.name).length - cleanProductName(a.name).length);
+    return candidates[0] || null;
   }
   async function loadProfitAnalytics() {
     $("profitMatchMessage").textContent = "正在讀取訂單與商品成本…";
@@ -743,20 +744,52 @@
 
     const products = productRows || [];
     const daily = new Map();
-    let revenue = 0, costTotal = 0, net = 0, matchedLines = 0, unmatchedLines = 0, excludedLines = 0;
+    const detailRows = [];
+    let revenue = 0, costTotal = 0, net = 0;
+    let matchedLines = 0, unmatchedName = 0, missingCost = 0, excludedLines = 0;
+
     for (const row of (orderRows || [])) {
       if (isCancelledStatus(row.order_status)) { excludedLines++; continue; }
       const qty = Number(row.quantity || 0);
       const salePrice = Number(row.unit_price || 0);
       if (!(qty > 0)) continue;
-      const product = findCostProduct(row.product_name, products)
-        || findCostProduct(row.raw_item_name, products);
-      if (!product || product.compare_at_price === null || product.compare_at_price === undefined || product.compare_at_price === "") {
-        unmatchedLines++;
+
+      const product = findCostProduct(row, products);
+      if (!product) {
+        unmatchedName++;
+        detailRows.push({
+          order: row.external_order_id, date: normalizeOrderDate(row.order_date),
+          sourceName: row.raw_item_name || row.product_name || "—",
+          productName: "未找到完全相符的商品名稱",
+          salePrice, unitCost: null, qty, revenue: salePrice * qty, cost: null, profit: null,
+          status: "商品名稱不符"
+        });
         continue;
       }
+
+      if (product.compare_at_price === null || product.compare_at_price === undefined || String(product.compare_at_price).trim() === "") {
+        missingCost++;
+        detailRows.push({
+          order: row.external_order_id, date: normalizeOrderDate(row.order_date),
+          sourceName: row.raw_item_name || row.product_name || "—",
+          productName: product.name, salePrice, unitCost: null, qty,
+          revenue: salePrice * qty, cost: null, profit: null, status: "商品尚未填寫成本"
+        });
+        continue;
+      }
+
       const unitCost = Number(product.compare_at_price);
-      if (!Number.isFinite(unitCost)) { unmatchedLines++; continue; }
+      if (!Number.isFinite(unitCost) || unitCost < 0) {
+        missingCost++;
+        detailRows.push({
+          order: row.external_order_id, date: normalizeOrderDate(row.order_date),
+          sourceName: row.raw_item_name || row.product_name || "—",
+          productName: product.name, salePrice, unitCost: null, qty,
+          revenue: salePrice * qty, cost: null, profit: null, status: "商品成本格式錯誤"
+        });
+        continue;
+      }
+
       const lineRevenue = salePrice * qty;
       const lineCost = unitCost * qty;
       const lineProfit = lineRevenue - lineCost;
@@ -766,6 +799,12 @@
       matchedLines++;
       const day = normalizeOrderDate(row.order_date);
       if (day) daily.set(day, (daily.get(day) || 0) + lineProfit);
+      detailRows.push({
+        order: row.external_order_id, date: day,
+        sourceName: row.raw_item_name || row.product_name || "—",
+        productName: product.name, salePrice, unitCost, qty,
+        revenue: lineRevenue, cost: lineCost, profit: lineProfit, status: "已成功比對"
+      });
     }
 
     $("profitRevenue").textContent = money(revenue);
@@ -803,9 +842,24 @@
       $("profitMatchMessage").textContent = "折線圖元件未載入，請確認網路可連線至 Chart.js。";
       return;
     }
-    const productCostSummary = products.map(p => `${p.name}：${p.compare_at_price ?? "未填成本"}`).join("；");
+
+    const detailBody = $("profitDetailRows");
+    if (detailBody) {
+      detailBody.innerHTML = detailRows.length ? detailRows.map(row => `
+        <tr>
+          <td>${escapeHtml(row.date || "—")}</td>
+          <td>${escapeHtml(String(row.order || "—"))}</td>
+          <td title="${escapeHtml(row.sourceName)}">${escapeHtml(row.sourceName)}</td>
+          <td>${escapeHtml(row.productName)}</td>
+          <td>${row.salePrice ? money(row.salePrice) : money(0)}</td>
+          <td>${row.unitCost === null ? "—" : money(row.unitCost)}</td>
+          <td>${row.qty}</td>
+          <td>${row.profit === null ? "—" : money(row.profit)}</td>
+          <td>${escapeHtml(row.status)}</td>
+        </tr>`).join("") : `<tr><td colspan="9">目前沒有可計算的有效訂單。</td></tr>`;
+    }
     $("profitMatchMessage").textContent =
-      `已比對 ${matchedLines} 筆商品明細；${unmatchedLines} 筆找不到商品或未填成本；排除取消訂單 ${excludedLines} 筆。商品成本讀取結果：${productCostSummary || "商品清單為空"}。每日營利依訂單日期彙總。`;
+      `成功比對 ${matchedLines} 筆明細；商品名稱不符 ${unmatchedName} 筆；商品未填成本／成本格式錯誤 ${missingCost} 筆；排除取消訂單 ${excludedLines} 筆。優惠價使用匯入 Excel 的單件優惠價，營收、成本及營利均乘上件數。`;
   }
 
   function wireEvents() {

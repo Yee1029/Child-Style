@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#4b3934">
   <title>Child Style｜管理後台</title>
-  <link rel="stylesheet" href="admin.css?v=4.2">
+  <link rel="stylesheet" href="admin.css?v=4.3">
 </head>
 <body>
   <header class="topbar">
@@ -131,6 +131,13 @@
               <div class="panel-heading"><div><h2>每日營利趨勢</h2><p class="hint">營利 =（訂單售價 − 商品成本）× 訂購件數；依訂單日期彙總。</p></div><button id="refreshProfitBtn" type="button" class="btn btn-outline">重新計算</button></div>
               <div class="profit-chart-wrap"><canvas id="profitTrendChart" aria-label="每日營利折線圖"></canvas></div>
               <p id="profitMatchMessage" class="hint" role="status">尚未計算。</p>
+              <div class="profit-detail-heading"><h3>訂單營利比對明細</h3><p>逐筆核對 Excel 優惠價、商品管理成本與計算結果。</p></div>
+              <div class="profit-detail-table-wrap">
+                <table class="profit-detail-table">
+                  <thead><tr><th>下單日期</th><th>訂單編號</th><th>Excel 商品名稱</th><th>比對商品</th><th>優惠價</th><th>單件成本</th><th>件數</th><th>營利</th><th>比對狀態</th></tr></thead>
+                  <tbody id="profitDetailRows"><tr><td colspan="9">尚未計算</td></tr></tbody>
+                </table>
+              </div>
             </section>
           </section>
         </div>
@@ -252,6 +259,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
-  <script src="admin.js?v=4.2"></script>
+  <script src="admin.js?v=4.3"></script>
 </body>
 </html>
