@@ -3,6 +3,9 @@
   const state = { categories: [], products: [], session: null, selectedFiles: [], existingImages: [], galleryItems: [], variants: [] };
   const client = () => window.supabaseClient;
   let orderCurrentPage = 1;
+  let idleLogoutTimer = null;
+  const IDLE_LOGOUT_MS = 30 * 60 * 1000;
+  const ACCOUNT_STORAGE_KEY = "childStyleAdminAccounts";
   const money = n => `NT$ ${Number(n || 0).toLocaleString("en-US")}`;
 
   function escapeHtml(value) {
@@ -23,12 +26,64 @@
     const el = $("globalMessage"); el.textContent = message; el.style.color = kind === "error" ? "#b42318" : kind === "success" ? "#197347" : "";
     if (message) window.setTimeout(() => { if (el.textContent === message) el.textContent = ""; }, 6500);
   }
+  function getSavedAccounts() {
+    try { return JSON.parse(localStorage.getItem(ACCOUNT_STORAGE_KEY) || "[]").filter(x => typeof x === "string"); }
+    catch { return []; }
+  }
+  function renderSavedAccounts() {
+    const list = $("savedAccounts");
+    if (!list) return;
+    list.innerHTML = getSavedAccounts().map(email => `<option value="${escapeHtml(email)}"></option>`).join("");
+  }
+  function rememberAccount(email) {
+    if (!$("rememberAccount").checked || !email) return;
+    const accounts = getSavedAccounts().filter(x => x.toLowerCase() !== email.toLowerCase());
+    accounts.unshift(email);
+    localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(accounts.slice(0, 8)));
+    renderSavedAccounts();
+  }
+  function clearIdleLogoutTimer() {
+    if (idleLogoutTimer) window.clearTimeout(idleLogoutTimer);
+    idleLogoutTimer = null;
+  }
+  function resetIdleLogoutTimer() {
+    if (!state.session) return;
+    clearIdleLogoutTimer();
+    idleLogoutTimer = window.setTimeout(async () => {
+      try { await client().auth.signOut(); } finally {
+        state.session = null;
+        showLogin();
+        alert("已閒置 30 分鐘，為保護帳號安全，系統已自動登出。");
+      }
+    }, IDLE_LOGOUT_MS);
+  }
+  function switchAdminView(viewName) {
+    document.querySelectorAll("[data-view-panel]").forEach(panel => {
+      panel.classList.toggle("active", panel.dataset.viewPanel === viewName);
+    });
+    document.querySelectorAll("[data-admin-view]").forEach(button => {
+      button.classList.toggle("active", button.dataset.adminView === viewName);
+    });
+    if (viewName === "orders") loadSellerOrderStats();
+  }
+  function openCategoryModal() {
+    $("categoryModal").hidden = false;
+    $("newCategoryName").value = "";
+    setMessage("categoryMessage", "");
+    $("newCategoryName").focus();
+  }
+  function closeCategoryModal() {
+    $("categoryModal").hidden = true;
+  }
   function showAdmin(session) {
     state.session = session;
     $("loginPanel").hidden = true;
     $("adminPanel").hidden = false;
     $("logoutBtn").hidden = false;
     $("signedInEmail").textContent = session.user.email || "已登入";
+    $("password").value = "";
+    switchAdminView("products");
+    resetIdleLogoutTimer();
     loadEverything();
   }
   function showLogin() {
@@ -37,6 +92,8 @@
     $("adminPanel").hidden = true;
     $("logoutBtn").hidden = true;
     $("signedInEmail").textContent = "";
+    clearIdleLogoutTimer();
+    $("password").value = "";
   }
   async function verifyAdmin(session) {
     const { data, error } = await client().from("user_roles")
@@ -58,6 +115,7 @@
       const { data, error } = await client().auth.signInWithPassword({ email, password });
       if (error) throw error;
       await verifyAdmin(data.session);
+      rememberAccount(email);
       setMessage("loginMessage", "");
       showAdmin(data.session);
     } catch (error) {
@@ -85,11 +143,7 @@
       .filter(c => c.is_active)
       .map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join("");
     if (current) $("categorySelect").value = current;
-    $("categoryList").innerHTML = state.categories.length ? state.categories.map(c => `
-      <div class="category-row">
-        <div><strong>${escapeHtml(c.name)}</strong><br><small>${escapeHtml(c.slug)} · ${c.is_active ? "啟用中" : "已停用"}</small></div>
-        <button type="button" data-toggle-category="${escapeHtml(c.id)}" data-active="${c.is_active ? "true" : "false"}">${c.is_active ? "停用" : "啟用"}</button>
-      </div>`).join("") : `<p class="hint">目前沒有分類，請先新增分類。</p>`;
+
   }
   async function loadProducts() {
     const { data, error } = await client().from("products")
@@ -123,15 +177,24 @@
   async function createCategory(event) {
     event.preventDefault();
     const name = $("newCategoryName").value.trim();
-    if (!name) return;
-    setMessage("categoryMessage", "新增中…");
-    const { error } = await client().from("categories").insert({
-      name, slug: slugify(name), description: "", sort_order: state.categories.length, is_active: true
-    });
-    if (error) { setMessage("categoryMessage", error.message, "error"); return; }
-    $("newCategoryName").value = "";
-    setMessage("categoryMessage", "分類新增成功。", "success");
-    await loadCategories();
+    if (!name) { alert("請輸入分類名稱。"); return; }
+    const button = $("categoryForm").querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const { data, error } = await client().from("categories").insert({
+        name, slug: slugify(name), description: "", sort_order: state.categories.length, is_active: true
+      }).select("id").single();
+      if (error) throw error;
+      await loadCategories();
+      if (data?.id) $("categorySelect").value = data.id;
+      $("categoryForm").reset();
+      closeCategoryModal();
+      alert("新增成功：商品分類已建立。");
+    } catch (error) {
+      alert("新增失敗：" + (error.message || "請稍後再試。"));
+    } finally {
+      button.disabled = false;
+    }
   }
   async function toggleCategory(button) {
     const id = button.dataset.toggleCategory;
@@ -220,7 +283,9 @@
     const categoryId = $("categorySelect").value;
     const price = Number($("productPrice").value);
     if (!name || !categoryId || !Number.isFinite(price) || price < 0) {
-      setMessage("formMessage", "請填寫商品名稱、分類與有效售價。", "error"); return;
+      setMessage("formMessage", "請填寫商品名稱、分類與有效售價。", "error");
+      alert("儲存失敗：請填寫商品名稱、分類與有效售價。");
+      return;
     }
     const id = $("productId").value;
     const slug = slugify($("productSlug").value || name);
@@ -296,13 +361,17 @@
         }).eq("id", finalRows[i].id).eq("product_id", productId);
         if (error) throw error;
       }
-      setMessage("formMessage", "儲存成功！", "success");
-      globalMessage("商品已儲存。", "success");
+      const successText = id ? "商品修改成功！" : "商品新增成功！";
+      alert(successText);
+      globalMessage(successText, "success");
       resetForm();
       await loadProducts();
+      switchAdminView("products");
     } catch (error) {
       console.error(error);
-      setMessage("formMessage", error.message || "儲存失敗。", "error");
+      const errorText = error.message || "儲存失敗。";
+      setMessage("formMessage", errorText, "error");
+      alert("儲存失敗：" + errorText + "\\n已保留目前填寫內容，請修正後再送出。");
     } finally {
       button.disabled = false; button.textContent = $("productId").value ? "儲存修改" : "儲存商品";
     }
@@ -576,6 +645,25 @@
   }
 
   function wireEvents() {
+    renderSavedAccounts();
+    document.querySelectorAll("[data-admin-view]").forEach(button => {
+      button.addEventListener("click", () => switchAdminView(button.dataset.adminView));
+    });
+    $("sidebarToggle").addEventListener("click", () => {
+      const collapsed = $("adminPanel").classList.toggle("sidebar-collapsed");
+      $("sidebarToggle").textContent = collapsed ? "›" : "‹";
+      $("sidebarToggle").title = collapsed ? "展開選單" : "收合選單";
+      $("sidebarToggle").setAttribute("aria-label", $("sidebarToggle").title);
+    });
+    $("openCategoryModal").addEventListener("click", openCategoryModal);
+    $("closeCategoryModal").addEventListener("click", closeCategoryModal);
+    $("cancelCategoryModal").addEventListener("click", closeCategoryModal);
+    $("categoryModal").addEventListener("click", event => {
+      if (event.target === $("categoryModal")) closeCategoryModal();
+    });
+    ["pointerdown","keydown","touchstart","scroll","mousemove"].forEach(eventName => {
+      document.addEventListener(eventName, resetIdleLogoutTimer, { passive: true });
+    });
     $("loginForm").addEventListener("submit", handleLogin);
     $("sellerOrderFile").addEventListener("change", async e => {
       const file=e.target.files[0]; $("importSellerOrdersBtn").disabled=!file;
@@ -648,10 +736,6 @@
     $("productSearch").addEventListener("input", renderProducts);
     $("statusFilter").addEventListener("change", renderProducts);
     $("refreshBtn").addEventListener("click", loadEverything);
-    $("categoryList").addEventListener("click", e => {
-      const btn = e.target.closest("[data-toggle-category]");
-      if (btn) toggleCategory(btn);
-    });
     $("productList").addEventListener("click", e => {
       const edit = e.target.closest("[data-edit-product]");
       const toggle = e.target.closest("[data-toggle-publish]");
