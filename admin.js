@@ -384,9 +384,15 @@
     const sheet = book.Sheets[sheetName];
     if (!sheet) throw new Error("找不到可讀取的工作表。");
 
-    const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : { s: { r: 0 }, e: { r: 15 } };
     const firstDataRow = 3; // zero-based row 3 = Excel row 4
-    const lastDataRow = Math.max(range.e.r, firstDataRow);
+    // Some seller exports contain an incorrect worksheet !ref (e.g. A1:AMO3)
+    // even though actual item rows continue below row 3. Determine the last
+    // real row from populated cell addresses instead of trusting !ref.
+    const populatedRows = Object.keys(sheet)
+      .map(address => /^([A-Z]+)(\\d+)$/.exec(address))
+      .filter(Boolean)
+      .map(match => Number(match[2]) - 1);
+    const lastDataRow = Math.max(firstDataRow, ...populatedRows);
     const c = { date: 3, order: 4, status: 5, recipient: 7, item: 12, price: 14, qty: 15 };
 
     let currentOrder = "", currentDate = "", currentStatus = "", currentRecipient = "";
