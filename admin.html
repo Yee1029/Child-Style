@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#4b3934">
   <title>Child Style｜管理後台</title>
-  <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="admin.css?v=4.1">
 </head>
 <body>
   <header class="topbar">
@@ -77,8 +77,80 @@
       </section>
           </section>
           <section class="admin-view" data-view-panel="add-product">
-            <div class="view-heading"><p class="eyebrow">PRODUCT EDITOR</p><h1>新增商品</h1><p>建立商品資訊、販售規格與商品圖片。</p></div>
-<section class="panel product-editor">
+            <div class="view-heading"><p class="eyebrow">PRODUCT EDITOR</p><h1>新增商品</h1><p>商品資料會以彈出視窗編輯，儲存後直接返回商品清單。</p></div>
+            <section class="panel add-product-launch">
+              <h2>建立新商品</h2>
+              <p>開啟商品編輯視窗，填寫商品資訊、成本、販售規格與照片。</p>
+              <button id="launchAddProduct" type="button" class="btn btn-dark">＋ 新增商品</button>
+            </section>
+          </section>
+          <section class="admin-view" data-view-panel="orders">
+            <div class="view-heading"><p class="eyebrow">SELLER ORDER ANALYTICS</p><h1>訂單統計</h1><p>匯入賣貨便訂單並統計商品、尺寸、顏色與件數。</p></div>
+<section class="panel orders-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">SELLER ORDER ANALYTICS</p><h2>賣貨便訂單統計</h2><p class="hint">匯入賣貨便「訂單資訊」Excel，自動累積商品、尺寸、顏色與件數。</p></div>
+        </div>
+        <div class="order-import-row">
+          <label class="order-upload" for="sellerOrderFile"><strong>＋ 選擇賣貨便 Excel</strong><span>支援 .xlsx / .xls，依照你提供的訂單資訊格式</span></label>
+          <input id="sellerOrderFile" type="file" accept=".xlsx,.xls" hidden>
+          <button id="importSellerOrdersBtn" type="button" class="btn btn-dark" disabled>匯入訂單</button>
+          <span id="orderImportStatus" class="message" role="status"></span>
+        </div>
+        <div class="order-stats-grid">
+          <article class="stat-card"><span>訂單筆數</span><strong id="orderCount">0</strong></article>
+          <article class="stat-card"><span>訂購件數</span><strong id="orderUnits">0</strong></article>
+          <article class="stat-card"><span>商品款式</span><strong id="orderProductCount">0</strong></article>
+        </div>
+        <div class="order-filter-row">
+          <input id="orderSearch" type="search" placeholder="搜尋商品名稱、尺寸或顏色">
+          <select id="orderStatusFilter"><option value="active">有效訂單（排除取消）</option><option value="all">全部狀態</option></select>
+        </div>
+        <div class="order-table-wrap"><table class="order-table"><thead><tr><th>商品樣式</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>訂單數</th></tr></thead><tbody id="orderStatsRows"><tr><td colspan="5">尚未匯入訂單</td></tr></tbody></table></div>
+        <div class="order-pagination">
+          <div class="order-page-size"><label for="orderPageSize">每頁顯示</label><select id="orderPageSize"><option value="10" selected>10 筆</option><option value="30">30 筆</option><option value="50">50 筆</option><option value="100">100 筆</option></select></div>
+          <span id="orderPaginationInfo" class="order-pagination-info">共 0 筆資料</span>
+          <div class="order-page-buttons"><button id="orderPrevPage" type="button" class="btn btn-outline" disabled>上一頁</button><button id="orderNextPage" type="button" class="btn btn-outline" disabled>下一頁</button></div>
+        </div>
+        <p class="hint">首次使用前，請先在 Supabase SQL Editor 執行專案附帶的 <code>seller-orders-schema.sql</code>。重複匯入相同訂單會更新原資料，不會重複累加。</p>
+      </section>
+          </section>
+          <section class="admin-view" data-view-panel="profit">
+            <div class="view-heading"><p class="eyebrow">PROFIT ANALYTICS</p><h1>營利分析</h1><p>依照訂單成立時間、實際售價、商品成本與訂購件數計算。</p></div>
+            <div class="profit-summary-grid">
+              <article class="stat-card"><span>總營收</span><strong id="profitRevenue">NT$ 0</strong></article>
+              <article class="stat-card"><span>商品成本</span><strong id="profitCost">NT$ 0</strong></article>
+              <article class="stat-card"><span>預估營利</span><strong id="profitNet">NT$ 0</strong></article>
+            </div>
+            <section class="panel profit-panel">
+              <div class="panel-heading"><div><h2>每日營利趨勢</h2><p class="hint">營利 =（訂單售價 − 商品成本）× 訂購件數；依訂單日期彙總。</p></div><button id="refreshProfitBtn" type="button" class="btn btn-outline">重新計算</button></div>
+              <div class="profit-chart-wrap"><canvas id="profitTrendChart" aria-label="每日營利折線圖"></canvas></div>
+              <p id="profitMatchMessage" class="hint" role="status">尚未計算。</p>
+            </section>
+          </section>
+        </div>
+      </div>
+
+      <div id="categoryModal" class="modal-backdrop" hidden>
+        <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
+          <button id="closeCategoryModal" class="modal-close" type="button" aria-label="關閉">×</button>
+          <p class="eyebrow">NEW CATEGORY</p>
+          <h2 id="categoryModalTitle">新增商品分類</h2>
+          <form id="categoryForm" class="category-form">
+            <label for="newCategoryName">分類名稱</label>
+            <input id="newCategoryName" required maxlength="60" placeholder="例如：上衣">
+            <div class="modal-actions">
+              <button id="cancelCategoryModal" type="button" class="btn btn-outline">取消</button>
+              <button class="btn btn-dark" type="submit">新增分類</button>
+            </div>
+            <p id="categoryMessage" class="message" role="status"></p>
+          </form>
+        </section>
+      </div>
+      <div id="productModal" class="modal-backdrop product-modal-backdrop" hidden>
+        <section class="modal-card product-modal-card" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+          <button id="closeProductModal" class="modal-close" type="button" aria-label="關閉">×</button>
+          <div class="product-modal-content">
+            <section class="panel product-editor">
           <div class="panel-heading">
             <div><p class="eyebrow">PRODUCT EDITOR</p><h2 id="editorTitle">新增商品</h2></div>
             <button id="resetFormBtn" type="button" class="btn btn-outline">清空表單</button>
@@ -102,8 +174,9 @@
                 <input id="productPrice" type="number" min="0" step="1" required placeholder="590">
               </div>
               <div class="field">
-                <label for="comparePrice">原價（選填）</label>
-                <input id="comparePrice" type="number" min="0" step="1" placeholder="790">
+                <label for="comparePrice">商品成本（NT$）</label>
+                <input id="comparePrice" type="number" min="0" step="1" placeholder="例如：250">
+                <small class="field-hint">用於營利分析，請填寫每件商品的實際成本。</small>
               </div>
               <div class="field">
                 <label for="productSlug">網址代稱（自動產生）</label>
@@ -153,8 +226,6 @@
                 <div id="galleryPreview" class="multi-preview"><span>尚未選擇商品照片</span></div>
                 <p class="hint">正面、背面、細節照及尺寸表都放在這裡。買家可點擊照片放大；每張最多 5MB。編輯商品時新增照片會接續加入，不會覆蓋舊照片。</p>
               </div>
-<p class="hint">可上傳不同尺寸區間、量測方式或不同款式的尺寸表；每張最多 5MB。編輯商品時新增尺寸表會接續加入，不會覆蓋舊尺寸表。</p>
-              </div>
             </div>
             <div class="form-actions">
               <button id="saveProductBtn" type="submit" class="btn btn-dark">儲存商品</button>
@@ -162,62 +233,7 @@
             </div>
           </form>
         </section>
-          </section>
-          <section class="admin-view" data-view-panel="orders">
-            <div class="view-heading"><p class="eyebrow">SELLER ORDER ANALYTICS</p><h1>訂單統計</h1><p>匯入賣貨便訂單並統計商品、尺寸、顏色與件數。</p></div>
-<section class="panel orders-panel">
-        <div class="panel-heading">
-          <div><p class="eyebrow">SELLER ORDER ANALYTICS</p><h2>賣貨便訂單統計</h2><p class="hint">匯入賣貨便「訂單資訊」Excel，自動累積商品、尺寸、顏色與件數。</p></div>
-        </div>
-        <div class="order-import-row">
-          <label class="order-upload" for="sellerOrderFile"><strong>＋ 選擇賣貨便 Excel</strong><span>支援 .xlsx / .xls，依照你提供的訂單資訊格式</span></label>
-          <input id="sellerOrderFile" type="file" accept=".xlsx,.xls" hidden>
-          <button id="importSellerOrdersBtn" type="button" class="btn btn-dark" disabled>匯入訂單</button>
-          <span id="orderImportStatus" class="message" role="status"></span>
-        </div>
-        <div class="order-stats-grid">
-          <article class="stat-card"><span>訂單筆數</span><strong id="orderCount">0</strong></article>
-          <article class="stat-card"><span>訂購件數</span><strong id="orderUnits">0</strong></article>
-          <article class="stat-card"><span>商品款式</span><strong id="orderProductCount">0</strong></article>
-        </div>
-        <div class="order-filter-row">
-          <input id="orderSearch" type="search" placeholder="搜尋商品名稱、尺寸或顏色">
-          <select id="orderStatusFilter"><option value="active">有效訂單（排除取消）</option><option value="all">全部狀態</option></select>
-        </div>
-        <div class="order-table-wrap"><table class="order-table"><thead><tr><th>商品樣式</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>訂單數</th></tr></thead><tbody id="orderStatsRows"><tr><td colspan="5">尚未匯入訂單</td></tr></tbody></table></div>
-        <div class="order-pagination">
-          <div class="order-page-size"><label for="orderPageSize">每頁顯示</label><select id="orderPageSize"><option value="10" selected>10 筆</option><option value="30">30 筆</option><option value="50">50 筆</option><option value="100">100 筆</option></select></div>
-          <span id="orderPaginationInfo" class="order-pagination-info">共 0 筆資料</span>
-          <div class="order-page-buttons"><button id="orderPrevPage" type="button" class="btn btn-outline" disabled>上一頁</button><button id="orderNextPage" type="button" class="btn btn-outline" disabled>下一頁</button></div>
-        </div>
-        <p class="hint">首次使用前，請先在 Supabase SQL Editor 執行專案附帶的 <code>seller-orders-schema.sql</code>。重複匯入相同訂單會更新原資料，不會重複累加。</p>
-      </section>
-          </section>
-          <section class="admin-view" data-view-panel="profit">
-            <div class="view-heading"><p class="eyebrow">PROFIT ANALYTICS</p><h1>營利分析</h1><p>後續可在此整合訂單收入、商品成本及營運費用。</p></div>
-            <section class="panel profit-placeholder">
-              <div class="profit-icon">◷</div>
-              <h2>營利分析功能準備中</h2>
-              <p>目前訂單統計已可讀取賣貨便訂單。營利分析還需要商品成本與費用資料，避免在缺少成本資料時顯示不準確的獲利數字。</p>
-            </section>
-          </section>
-        </div>
-      </div>
-
-      <div id="categoryModal" class="modal-backdrop" hidden>
-        <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="categoryModalTitle">
-          <button id="closeCategoryModal" class="modal-close" type="button" aria-label="關閉">×</button>
-          <p class="eyebrow">NEW CATEGORY</p>
-          <h2 id="categoryModalTitle">新增商品分類</h2>
-          <form id="categoryForm" class="category-form">
-            <label for="newCategoryName">分類名稱</label>
-            <input id="newCategoryName" required maxlength="60" placeholder="例如：上衣">
-            <div class="modal-actions">
-              <button id="cancelCategoryModal" type="button" class="btn btn-outline">取消</button>
-              <button class="btn btn-dark" type="submit">新增分類</button>
-            </div>
-            <p id="categoryMessage" class="message" role="status"></p>
-          </form>
+          </div>
         </section>
       </div>
       <div id="globalMessage" class="global-message" role="status" aria-live="polite"></div>
@@ -227,8 +243,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
-  <script src="admin.js"></script>
+  <script src="admin.js?v=4.1"></script>
 </body>
 </html>

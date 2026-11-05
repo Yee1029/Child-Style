@@ -3,6 +3,7 @@
   const state = { categories: [], products: [], session: null, selectedFiles: [], existingImages: [], galleryItems: [], variants: [] };
   const client = () => window.supabaseClient;
   let orderCurrentPage = 1;
+  let profitTrendChart = null;
   let idleLogoutTimer = null;
   const IDLE_LOGOUT_MS = 30 * 60 * 1000;
   const ACCOUNT_STORAGE_KEY = "childStyleAdminAccounts";
@@ -58,6 +59,13 @@
     }, IDLE_LOGOUT_MS);
   }
   function switchAdminView(viewName) {
+    if (viewName === "add-product") {
+      document.querySelectorAll("[data-view-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.viewPanel === "products"));
+      document.querySelectorAll("[data-admin-view]").forEach(button => button.classList.toggle("active", button.dataset.adminView === "add-product"));
+      resetForm();
+      openProductModal();
+      return;
+    }
     document.querySelectorAll("[data-view-panel]").forEach(panel => {
       panel.classList.toggle("active", panel.dataset.viewPanel === viewName);
     });
@@ -65,6 +73,15 @@
       button.classList.toggle("active", button.dataset.adminView === viewName);
     });
     if (viewName === "orders") loadSellerOrderStats();
+    if (viewName === "profit") loadProfitAnalytics();
+  }
+  function openProductModal() {
+    $("productModal").hidden = false;
+    document.body.classList.add("modal-open");
+  }
+  function closeProductModal() {
+    $("productModal").hidden = true;
+    document.body.classList.remove("modal-open");
   }
   function openCategoryModal() {
     $("categoryModal").hidden = false;
@@ -264,7 +281,7 @@
     $("editorTitle").textContent = "編輯商品";
     $("saveProductBtn").textContent = "儲存修改";
     setMessage("formMessage", "已載入商品，可直接修改。", "success");
-    $("productForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    openProductModal();
   }
   async function uploadImage(file, productId, prefix = "gallery") {
     if (!file) return "";
@@ -363,8 +380,9 @@
       }
       const successText = id ? "商品修改成功！" : "商品新增成功！";
       alert(successText);
-      globalMessage(successText, "success");
+      closeProductModal();
       resetForm();
+      globalMessage(successText, "success");
       await loadProducts();
       switchAdminView("products");
     } catch (error) {
@@ -644,6 +662,101 @@
     $("orderNextPage").disabled = orderCurrentPage >= totalPages;
   }
 
+  function normalizeOrderDate(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const m = raw.match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function findCostProduct(orderProductName, products) {
+    const target = String(orderProductName || "").trim();
+    if (!target) return null;
+    const candidates = products.filter(p => {
+      const name = String(p.name || "").trim();
+      return name === target || name.startsWith(target) || target.startsWith(name);
+    });
+    candidates.sort((a,b) => String(b.name || "").length - String(a.name || "").length);
+    return candidates[0] || null;
+  }
+  async function loadProfitAnalytics() {
+    $("profitMatchMessage").textContent = "正在讀取訂單與商品成本…";
+    const [{ data: orderRows, error: orderError }, { data: productRows, error: productError }] = await Promise.all([
+      client().from("seller_order_lines").select("external_order_id,order_date,order_status,product_name,quantity,unit_price"),
+      client().from("products").select("id,name,price,compare_at_price")
+    ]);
+    if (orderError || productError) {
+      $("profitMatchMessage").textContent = "營利資料讀取失敗：" + (orderError?.message || productError?.message);
+      return;
+    }
+
+    const products = productRows || [];
+    const daily = new Map();
+    let revenue = 0, costTotal = 0, net = 0, matchedLines = 0, unmatchedLines = 0, excludedLines = 0;
+    for (const row of (orderRows || [])) {
+      if (isCancelledStatus(row.order_status)) { excludedLines++; continue; }
+      const qty = Number(row.quantity || 0);
+      const salePrice = Number(row.unit_price || 0);
+      if (!(qty > 0)) continue;
+      const product = findCostProduct(row.product_name, products);
+      if (!product || product.compare_at_price === null || product.compare_at_price === undefined || product.compare_at_price === "") {
+        unmatchedLines++;
+        continue;
+      }
+      const unitCost = Number(product.compare_at_price);
+      if (!Number.isFinite(unitCost)) { unmatchedLines++; continue; }
+      const lineRevenue = salePrice * qty;
+      const lineCost = unitCost * qty;
+      const lineProfit = lineRevenue - lineCost;
+      revenue += lineRevenue;
+      costTotal += lineCost;
+      net += lineProfit;
+      matchedLines++;
+      const day = normalizeOrderDate(row.order_date);
+      if (day) daily.set(day, (daily.get(day) || 0) + lineProfit);
+    }
+
+    $("profitRevenue").textContent = money(revenue);
+    $("profitCost").textContent = money(costTotal);
+    $("profitNet").textContent = money(net);
+    const days = [...daily.keys()].sort();
+    const values = days.map(day => daily.get(day));
+    const canvas = $("profitTrendChart");
+    if (profitTrendChart) profitTrendChart.destroy();
+    if (window.Chart && canvas) {
+      profitTrendChart = new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: days,
+          datasets: [{
+            label: "每日預估營利",
+            data: values,
+            borderColor: "#a86e59",
+            backgroundColor: "rgba(168,110,89,.13)",
+            fill: true,
+            tension: .28,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { intersect: false, mode: "index" },
+          plugins: { legend: { display: true } },
+          scales: { y: { ticks: { callback: value => "NT$ " + Number(value).toLocaleString("en-US") } } }
+        }
+      });
+    } else {
+      $("profitMatchMessage").textContent = "折線圖元件未載入，請確認網路可連線至 Chart.js。";
+      return;
+    }
+    $("profitMatchMessage").textContent =
+      `已比對 ${matchedLines} 筆商品明細；${unmatchedLines} 筆找不到商品成本或商品名稱，未納入營利；排除取消訂單 ${excludedLines} 筆。每日營利依訂單日期彙總。`;
+  }
+
   function wireEvents() {
     renderSavedAccounts();
     document.querySelectorAll("[data-admin-view]").forEach(button => {
@@ -656,6 +769,24 @@
       $("sidebarToggle").setAttribute("aria-label", $("sidebarToggle").title);
     });
     $("openCategoryModal").addEventListener("click", openCategoryModal);
+    $("launchAddProduct").addEventListener("click", () => {
+      resetForm();
+      openProductModal();
+    });
+    $("closeProductModal").addEventListener("click", () => {
+      if (confirm("確定關閉商品編輯視窗？尚未儲存的內容將會遺失。")) {
+        closeProductModal();
+        resetForm();
+        switchAdminView("products");
+      }
+    });
+    $("productModal").addEventListener("click", event => {
+      if (event.target === $("productModal") && confirm("確定關閉商品編輯視窗？尚未儲存的內容將會遺失。")) {
+        closeProductModal();
+        resetForm();
+        switchAdminView("products");
+      }
+    });
     $("closeCategoryModal").addEventListener("click", closeCategoryModal);
     $("cancelCategoryModal").addEventListener("click", closeCategoryModal);
     $("categoryModal").addEventListener("click", event => {
@@ -736,6 +867,7 @@
     $("productSearch").addEventListener("input", renderProducts);
     $("statusFilter").addEventListener("change", renderProducts);
     $("refreshBtn").addEventListener("click", loadEverything);
+    $("refreshProfitBtn").addEventListener("click", loadProfitAnalytics);
     $("productList").addEventListener("click", e => {
       const edit = e.target.closest("[data-edit-product]");
       const toggle = e.target.closest("[data-toggle-publish]");
