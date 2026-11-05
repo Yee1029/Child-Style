@@ -390,7 +390,11 @@
     const c = { date: 3, order: 4, status: 5, recipient: 7, item: 12, price: 14, qty: 15 };
 
     let currentOrder = "", currentDate = "", currentStatus = "", currentRecipient = "";
-    const output = [];
+    const aggregated = new Map();
+
+    // A seller export leaves the order ID blank on continuation rows.
+    // Carry forward the latest non-empty order metadata, then aggregate
+    // identical item/specification rows within that order.
     for (let r = firstDataRow; r <= lastDataRow; r++) {
       const orderCell = cellText(sheet, r, c.order);
       if (orderCell) {
@@ -409,21 +413,44 @@
 
       const parsed = parseSellerItem(itemRaw);
       const priceRaw = cellText(sheet, r, c.price).replace(/,/g, "").trim();
-      output.push({
-        external_order_id: currentOrder,
-        line_key: `${sheetName}-${r + 1}`,
-        order_date: currentDate,
-        order_status: currentStatus,
-        recipient: currentRecipient,
-        product_name: parsed.product_name,
-        raw_item_name: itemRaw,
-        size: parsed.size,
-        color: parsed.color,
-        quantity,
-        unit_price: Number(priceRaw) || 0,
-        source_file: file.name
-      });
+      const unitPrice = Number(priceRaw) || 0;
+      const normalizedItem = itemRaw.replace(/\s+/g, " ").trim();
+      const aggregateKey = [currentOrder, normalizedItem, unitPrice].join("||");
+      const existing = aggregated.get(aggregateKey);
+
+      if (existing) {
+        existing.quantity += quantity;
+      } else {
+        aggregated.set(aggregateKey, {
+          external_order_id: currentOrder,
+          order_date: currentDate,
+          order_status: currentStatus,
+          recipient: currentRecipient,
+          product_name: parsed.product_name,
+          raw_item_name: normalizedItem,
+          size: parsed.size,
+          color: parsed.color,
+          quantity,
+          unit_price: unitPrice,
+          source_file: file.name
+        });
+      }
     }
+
+    // Stable line keys make repeated uploads of the same order overwrite
+    // the previous snapshot instead of adding duplicate quantities.
+    const stableHash = value => {
+      let hash = 2166136261;
+      for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return (hash >>> 0).toString(16);
+    };
+    const output = [...aggregated.values()].map(row => ({
+      ...row,
+      line_key: `item-${stableHash(`${row.raw_item_name}||${row.unit_price}`)}`
+    }));
     if (!output.length) {
       const sample = `E4=${cellText(sheet, 3, 4) || "(空白)"}；M4=${cellText(sheet, 3, 12) || "(空白)"}；P4=${cellText(sheet, 3, 15) || "(空白)"}`;
       throw new Error(`已讀取「${sheetName}」工作表，但沒有可匯入的商品明細。實際讀取值：${sample}。請截圖回傳這段訊息。`);
@@ -432,21 +459,54 @@
   }
 
   async function importSellerOrders() {
-    const file=$("sellerOrderFile").files[0];
+    const file = $("sellerOrderFile").files[0];
     if (!file) return;
-    const btn=$("importSellerOrdersBtn"); btn.disabled=true;
-    $("orderImportStatus").textContent="正在讀取 Excel…";
+    const btn = $("importSellerOrdersBtn");
+    btn.disabled = true;
+    $("orderImportStatus").textContent = "正在讀取 Excel…";
     try {
-      parsedSellerOrders=await readSellerExcel(file);
-      const {error}=await client().from("seller_order_lines").upsert(parsedSellerOrders,{onConflict:"external_order_id,line_key"});
-      if(error) throw error;
-      $("orderImportStatus").textContent=`成功匯入 ${parsedSellerOrders.length} 筆商品明細（工作表自動辨識）。`;
-      $("orderImportStatus").className="message success";
+      parsedSellerOrders = await readSellerExcel(file);
+
+      const orderIds = [...new Set(parsedSellerOrders.map(row => row.external_order_id))];
+      const { data: existingRows, error: readError } = await client()
+        .from("seller_order_lines")
+        .select("id,external_order_id,line_key")
+        .in("external_order_id", orderIds);
+      if (readError) throw readError;
+
+      // Upsert first. Existing matching order/item rows are updated to the
+      // latest Excel quantities; newly added items are inserted.
+      const { error: upsertError } = await client()
+        .from("seller_order_lines")
+        .upsert(parsedSellerOrders, { onConflict: "external_order_id,line_key" });
+      if (upsertError) throw upsertError;
+
+      // Remove obsolete rows belonging to the imported orders only.
+      // This also cleans up legacy row-number keys from earlier versions.
+      const latestKeys = new Set(parsedSellerOrders.map(row => `${row.external_order_id}||${row.line_key}`));
+      const staleIds = (existingRows || [])
+        .filter(row => !latestKeys.has(`${row.external_order_id}||${row.line_key}`))
+        .map(row => row.id);
+
+      if (staleIds.length) {
+        const { error: deleteError } = await client()
+          .from("seller_order_lines")
+          .delete()
+          .in("id", staleIds);
+        if (deleteError) throw deleteError;
+      }
+
+      const detailCount = parsedSellerOrders.length;
+      $("orderImportStatus").textContent =
+        `比對完成：${orderIds.length} 張訂單、${detailCount} 筆商品明細、${parsedSellerOrders.reduce((sum, row) => sum + Number(row.quantity || 0), 0)} 件商品。相同訂單已更新，不重複累加。`;
+      $("orderImportStatus").className = "message success";
       await loadSellerOrderStats();
-    } catch(err) {
-      $("orderImportStatus").textContent=err.message||"匯入失敗";
-      $("orderImportStatus").className="message error";
-    } finally {btn.disabled=false;}
+    } catch (err) {
+      $("orderImportStatus").textContent = err.message || "匯入失敗";
+      $("orderImportStatus").className = "message error";
+    } finally {
+      btn.disabled = false;
+    }
   }
   async function loadSellerOrderStats() {
     const {data,error}=await client().from("seller_order_lines").select("external_order_id,order_status,product_name,size,color,quantity");
