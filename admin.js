@@ -6,6 +6,8 @@
   let orderSortKey = "size";
   let orderSortDirection = "asc";
   let profitTrendChart = null;
+  let fulfillmentOrders = [];
+  let activeFulfillmentOrder = null;
   let idleLogoutTimer = null;
   const IDLE_LOGOUT_MS = 30 * 60 * 1000;
   const ACCOUNT_STORAGE_KEY = "childStyleAdminAccounts";
@@ -75,6 +77,7 @@
       button.classList.toggle("active", button.dataset.adminView === viewName);
     });
     if (viewName === "orders") loadSellerOrderStats();
+    if (viewName === "fulfillment") loadFulfillmentOrders();
     if (viewName === "profit") loadProfitAnalytics();
   }
   function openProductModal() {
@@ -584,6 +587,18 @@
         .upsert(parsedSellerOrders, { onConflict: "external_order_id,line_key" });
       if (upsertError) throw upsertError;
 
+      // Sync Excel-owned order header fields only. Fulfillment status and notes are intentionally omitted.
+      const orderHeaders = [...new Map(parsedSellerOrders.map(row => [row.external_order_id, {
+        external_order_id: row.external_order_id,
+        order_date: row.order_date || null,
+        recipient: row.recipient || null,
+        seller_status: row.order_status || null,
+        source_file: row.source_file || file.name
+      }])).values()];
+      const { error: headerError } = await client().from("seller_orders")
+        .upsert(orderHeaders, { onConflict: "external_order_id" });
+      if (headerError) throw headerError;
+
       // Remove obsolete rows belonging to the imported orders only.
       // This also cleans up legacy row-number keys from earlier versions.
       const latestKeys = new Set(parsedSellerOrders.map(row => `${row.external_order_id}||${row.line_key}`));
@@ -862,6 +877,76 @@
       `成功比對 ${matchedLines} 筆明細；商品名稱不符 ${unmatchedName} 筆；商品未填成本／成本格式錯誤 ${missingCost} 筆；排除取消訂單 ${excludedLines} 筆。優惠價使用匯入 Excel 的單件優惠價，營收、成本及營利均乘上件數。`;
   }
 
+  const FULFILLMENT_STATUSES = ["待叫貨","已叫貨","部分到貨","已到貨","已包貨","已寄出","退貨待處理","待重新包貨","退貨已結案","已完成"];
+  const fmtDate = value => value ? new Date(value).toLocaleString("zh-TW", { hour12:false }) : "—";
+  async function loadFulfillmentOrders() {
+    const body = $("fulfillmentRows"); if (!body) return;
+    body.innerHTML = `<tr><td colspan="7">正在載入訂單…</td></tr>`;
+    try {
+      const [{data: orders,error:oErr},{data: lines,error:lErr}] = await Promise.all([
+        client().from("seller_orders").select("*").order("order_date",{ascending:false}),
+        client().from("seller_order_lines").select("external_order_id,quantity")
+      ]);
+      if (oErr) throw oErr; if (lErr) throw lErr;
+      const totals = new Map(); (lines||[]).forEach(x=>totals.set(x.external_order_id,(totals.get(x.external_order_id)||0)+Number(x.quantity||0)));
+      fulfillmentOrders = (orders||[]).map(o=>({...o,total_quantity:totals.get(o.external_order_id)||0}));
+      renderFulfillmentOrders();
+    } catch(err) { body.innerHTML=`<tr><td colspan="7">載入失敗：${escapeHtml(err.message)}</td></tr>`; }
+  }
+  function renderFulfillmentOrders() {
+    const q=($("fulfillmentSearch").value||"").trim().toLowerCase(), f=$("fulfillmentStatusFilter").value;
+    const rows=fulfillmentOrders.filter(o=>(f==="all"||o.fulfillment_status===f)&&`${o.external_order_id} ${o.recipient||""}`.toLowerCase().includes(q));
+    $("fulfillmentTotal").textContent=fulfillmentOrders.length;
+    $("fulfillmentPending").textContent=fulfillmentOrders.filter(o=>["待叫貨","已叫貨","部分到貨","已到貨","已包貨","待重新包貨"].includes(o.fulfillment_status)).length;
+    $("fulfillmentReturned").textContent=fulfillmentOrders.filter(o=>o.fulfillment_status==="退貨待處理").length;
+    $("fulfillmentRows").innerHTML=rows.length?rows.map(o=>`<tr><td>${escapeHtml(o.external_order_id)}</td><td>${escapeHtml(o.order_date||"—")}</td><td>${escapeHtml(o.recipient||"—")}</td><td>${o.total_quantity}</td><td><span class="fulfillment-status">${escapeHtml(o.fulfillment_status||"待叫貨")}</span></td><td>${fmtDate(o.updated_at)}</td><td><button class="btn btn-outline btn-small" data-open-fulfillment="${escapeHtml(o.external_order_id)}">查看／編輯</button></td></tr>`).join(""):`<tr><td colspan="7">沒有符合的訂單。請先到「訂單統計」匯入賣貨便 Excel。</td></tr>`;
+  }
+  async function openFulfillmentOrder(orderId) {
+    try {
+      const order=fulfillmentOrders.find(x=>x.external_order_id===orderId); if(!order) throw new Error("找不到訂單");
+      activeFulfillmentOrder=order;
+      const [{data:lines,error:le},{data:events,error:ee},{data:shipments,error:se}] = await Promise.all([
+        client().from("seller_order_lines").select("product_name,raw_item_name,size,color,quantity,unit_price").eq("external_order_id",orderId).order("id"),
+        client().from("seller_order_events").select("*").eq("external_order_id",orderId).order("created_at",{ascending:false}),
+        client().from("seller_order_shipments").select("*").eq("external_order_id",orderId).order("shipment_no",{ascending:false})
+      ]);
+      if(le) throw le;if(ee) throw ee;if(se) throw se;
+      $("fulfillmentModalTitle").textContent=`訂單 ${orderId}`;
+      $("fulfillmentOrderInfo").innerHTML=`<p><b>收件人：</b>${escapeHtml(order.recipient||"—")}</p><p><b>訂購日期：</b>${escapeHtml(order.order_date||"—")}</p><p><b>賣貨便狀態：</b>${escapeHtml(order.seller_status||"—")}</p><p><b>目前管理狀態：</b>${escapeHtml(order.fulfillment_status||"待叫貨")}</p>`;
+      $("fulfillmentNewStatus").value=order.fulfillment_status||"待叫貨";
+      $("fulfillmentActionNote").value=""; $("fulfillmentOrderNotes").value=order.notes||"";
+      $("returnActionPanel").hidden=order.fulfillment_status!=="退貨待處理";
+      $("fulfillmentLineRows").innerHTML=(lines||[]).map(x=>`<tr><td>${escapeHtml(x.product_name||x.raw_item_name||"—")}</td><td>${escapeHtml(x.size||"—")}</td><td>${escapeHtml(x.color||"—")}</td><td>${Number(x.quantity||0)}</td><td>${money(x.unit_price)}</td></tr>`).join("")||`<tr><td colspan="5">沒有商品明細</td></tr>`;
+      $("fulfillmentShipmentHistory").innerHTML=(shipments||[]).length?(shipments||[]).map(x=>`<article class="fulfillment-history-item"><b>第 ${x.shipment_no} 次寄出</b><p>寄出：${fmtDate(x.shipped_at)}｜${escapeHtml(x.shipped_by_email||"—")}</p><p>退回：${fmtDate(x.returned_at)}｜${escapeHtml(x.returned_by_email||"—")}</p>${x.return_reason?`<p>退回原因：${escapeHtml(x.return_reason)}</p>`:""}${x.tracking_number?`<p>物流單號：${escapeHtml(x.tracking_number)}</p>`:""}</article>`).join(""):`<p class="hint">尚無寄出／退回紀錄。</p>`;
+      $("fulfillmentEventHistory").innerHTML=(events||[]).length?(events||[]).map(x=>`<article class="fulfillment-history-item"><b>${escapeHtml(x.event_type||"資料異動")}</b><p>${fmtDate(x.created_at)}｜${escapeHtml(x.actor_email||"未知使用者")}</p>${x.old_value?`<p>修改前：${escapeHtml(JSON.stringify(x.old_value))}</p>`:""}${x.new_value?`<p>修改後：${escapeHtml(JSON.stringify(x.new_value))}</p>`:""}${x.note?`<p>備註：${escapeHtml(x.note)}</p>`:""}</article>`).join(""):`<p class="hint">尚無操作履歷。</p>`;
+      $("fulfillmentModal").hidden=false; document.body.classList.add("modal-open");
+    } catch(err) { globalMessage("訂單明細載入失敗："+err.message,"error"); }
+  }
+  async function logOrderEvent(orderId,eventType,oldValue,newValue,note="") {
+    const user=state.session?.user;
+    const {error}=await client().from("seller_order_events").insert({external_order_id:orderId,event_type:eventType,old_value:oldValue??null,new_value:newValue??null,note,actor_id:user?.id||null,actor_email:user?.email||null});
+    if(error) throw error;
+  }
+  async function changeFulfillmentStatus(nextStatus,note="") {
+    const order=activeFulfillmentOrder;if(!order)return;
+    const oldStatus=order.fulfillment_status||"待叫貨";
+    if(nextStatus===oldStatus){globalMessage("狀態沒有變更。","error");return;}
+    try {
+      const {error}=await client().rpc("set_seller_order_fulfillment_status",{
+        p_order_id:order.external_order_id,p_status:nextStatus,p_note:note
+      });
+      if(error)throw error;
+      globalMessage("訂單狀態已更新，操作履歷及出貨紀錄已同步新增。","success");
+      await loadFulfillmentOrders(); await openFulfillmentOrder(order.external_order_id);
+    } catch(err){globalMessage("更新失敗："+err.message,"error");}
+  }
+  async function saveFulfillmentNotes(){
+    const order=activeFulfillmentOrder;if(!order)return;
+    const next=$("fulfillmentOrderNotes").value.trim(),old=order.notes||"";if(next===old){globalMessage("備註沒有變更。","error");return;}
+    try{const {error}=await client().from("seller_orders").update({notes:next,updated_at:new Date().toISOString()}).eq("external_order_id",order.external_order_id);if(error)throw error;await loadFulfillmentOrders();await openFulfillmentOrder(order.external_order_id);globalMessage("備註已儲存，修改履歷已自動新增。","success");}catch(err){globalMessage("儲存失敗："+err.message,"error");}
+  }
+  async function closeFulfillmentModal(){ $("fulfillmentModal").hidden=true;document.body.classList.remove("modal-open");activeFulfillmentOrder=null; }
+
   function wireEvents() {
     renderSavedAccounts();
     document.querySelectorAll("[data-admin-view]").forEach(button => {
@@ -925,6 +1010,16 @@
       orderCurrentPage += 1;
       loadSellerOrderStats(false);
     });
+    $("refreshFulfillmentBtn").addEventListener("click",loadFulfillmentOrders);
+    $("fulfillmentSearch").addEventListener("input",renderFulfillmentOrders);
+    $("fulfillmentStatusFilter").addEventListener("change",renderFulfillmentOrders);
+    $("fulfillmentRows").addEventListener("click",e=>{const b=e.target.closest("[data-open-fulfillment]");if(b)openFulfillmentOrder(b.dataset.openFulfillment);});
+    $("closeFulfillmentModal").addEventListener("click",closeFulfillmentModal);
+    $("fulfillmentModal").addEventListener("click",e=>{if(e.target===$("fulfillmentModal"))closeFulfillmentModal();});
+    $("saveFulfillmentStatus").addEventListener("click",()=>changeFulfillmentStatus($("fulfillmentNewStatus").value,$("fulfillmentActionNote").value.trim()));
+    $("closeReturnedOrder").addEventListener("click",()=>changeFulfillmentStatus("退貨已結案","退貨後選擇結案"));
+    $("reshipReturnedOrder").addEventListener("click",()=>changeFulfillmentStatus("待重新包貨","退貨後重新寄給原客人"));
+    $("saveFulfillmentNotes").addEventListener("click",saveFulfillmentNotes);
     $("logoutBtn").addEventListener("click", handleLogout);
     $("categoryForm").addEventListener("submit", createCategory);
     $("productForm").addEventListener("submit", saveProduct);

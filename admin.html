@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#4b3934">
   <title>Child Style｜管理後台</title>
-  <link rel="stylesheet" href="admin.css?v=4.3">
+  <link rel="stylesheet" href="admin.css?v=4.5">
 </head>
 <body>
   <header class="topbar">
@@ -45,6 +45,7 @@
           <div class="sidebar-divider"></div>
           <button type="button" class="sidebar-link" data-admin-view="add-product"><span>＋</span> 新增商品</button>
           <button type="button" class="sidebar-link" data-admin-view="orders"><span>▤</span> 訂單統計</button>
+          <button type="button" class="sidebar-link" data-admin-view="fulfillment"><span>⇢</span> 出貨管理</button>
           <button type="button" class="sidebar-link" data-admin-view="profit"><span>◷</span> 營利分析</button>
           <div class="sidebar-note">閒置 30 分鐘將自動登出</div>
         </aside>
@@ -119,6 +120,19 @@
         </div>
         <p class="hint">首次使用前，請先在 Supabase SQL Editor 執行專案附帶的 <code>seller-orders-schema.sql</code>。重複匯入相同訂單會更新原資料，不會重複累加。</p>
       </section>
+          </section>
+          <section class="admin-view" data-view-panel="fulfillment">
+            <div class="view-heading"><p class="eyebrow">ORDER FULFILLMENT</p><h1>出貨管理</h1><p>以整張訂單管理叫貨、到貨、包貨、寄出與退貨；所有操作都會留下時間及操作者紀錄。</p></div>
+            <section class="panel fulfillment-panel">
+              <div class="fulfillment-toolbar">
+                <input id="fulfillmentSearch" type="search" placeholder="搜尋訂單編號或收件人">
+                <select id="fulfillmentStatusFilter"><option value="all">全部管理狀態</option><option>待叫貨</option><option>已叫貨</option><option>部分到貨</option><option>已到貨</option><option>已包貨</option><option>已寄出</option><option>退貨待處理</option><option>待重新包貨</option><option>退貨已結案</option><option>已完成</option></select>
+                <button id="refreshFulfillmentBtn" type="button" class="btn btn-outline">重新整理</button>
+              </div>
+              <div class="fulfillment-stats"><article class="stat-card"><span>訂單總數</span><strong id="fulfillmentTotal">0</strong></article><article class="stat-card"><span>待處理</span><strong id="fulfillmentPending">0</strong></article><article class="stat-card"><span>退貨待處理</span><strong id="fulfillmentReturned">0</strong></article></div>
+              <div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead><tr><th>訂單編號</th><th>訂購日期</th><th>收件人</th><th>商品件數</th><th>管理狀態</th><th>最後更新</th><th>操作</th></tr></thead><tbody id="fulfillmentRows"><tr><td colspan="7">載入中…</td></tr></tbody></table></div>
+              <p class="hint">訂單資料由訂單統計頁匯入的賣貨便 Excel 建立。重新匯入不會重設管理狀態、備註或歷史紀錄。</p>
+            </section>
           </section>
           <section class="admin-view" data-view-panel="profit">
             <div class="view-heading"><p class="eyebrow">PROFIT ANALYTICS</p><h1>營利分析</h1><p>依照訂單成立時間、實際售價、商品成本與訂購件數計算。</p></div>
@@ -249,6 +263,24 @@
           </div>
         </section>
       </div>
+      <div id="fulfillmentModal" class="modal-backdrop" hidden>
+        <section class="modal-card fulfillment-modal" role="dialog" aria-modal="true" aria-labelledby="fulfillmentModalTitle">
+          <button id="closeFulfillmentModal" class="modal-close" type="button" aria-label="關閉">×</button>
+          <p class="eyebrow">ORDER DETAIL</p><h2 id="fulfillmentModalTitle">訂單明細</h2>
+          <div id="fulfillmentOrderInfo" class="fulfillment-order-info"></div>
+          <div class="fulfillment-action-grid">
+            <label>訂單管理狀態<select id="fulfillmentNewStatus"><option>待叫貨</option><option>已叫貨</option><option>部分到貨</option><option>已到貨</option><option>已包貨</option><option>已寄出</option><option>退貨待處理</option><option>待重新包貨</option><option>退貨已結案</option><option>已完成</option></select></label>
+            <label>操作備註<input id="fulfillmentActionNote" maxlength="500" placeholder="例如：供應商已確認出貨"></label>
+            <button id="saveFulfillmentStatus" type="button" class="btn btn-dark">更新狀態</button>
+          </div>
+          <div id="returnActionPanel" class="return-action-panel" hidden><h3>退貨處理</h3><p>商品已退回後，可直接結案，或重新包貨寄給原客人。</p><div class="modal-actions"><button id="closeReturnedOrder" type="button" class="btn btn-outline">退貨結案</button><button id="reshipReturnedOrder" type="button" class="btn btn-dark">重新寄給原客人</button></div></div>
+          <h3>訂單商品明細</h3><div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead><tr><th>商品</th><th>尺寸</th><th>顏色</th><th>件數</th><th>單價</th></tr></thead><tbody id="fulfillmentLineRows"></tbody></table></div>
+          <h3>寄出／退回紀錄</h3><div id="fulfillmentShipmentHistory" class="fulfillment-history"></div>
+          <h3>完整操作履歷</h3><div id="fulfillmentEventHistory" class="fulfillment-history"></div>
+          <label class="fulfillment-notes-label">訂單備註<textarea id="fulfillmentOrderNotes" rows="3" maxlength="2000" placeholder="訂單相關備註"></textarea></label>
+          <button id="saveFulfillmentNotes" type="button" class="btn btn-outline">儲存備註</button>
+        </section>
+      </div>
       <div id="globalMessage" class="global-message" role="status" aria-live="polite"></div>
     </section>
   </main>
@@ -259,6 +291,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
-  <script src="admin.js?v=4.3"></script>
+  <script src="admin.js?v=4.5"></script>
 </body>
 </html>
