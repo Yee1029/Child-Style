@@ -956,9 +956,33 @@
       $("returnActionPanel").hidden=order.fulfillment_status!=="退貨待處理";
       $("fulfillmentLineRows").innerHTML=(lines||[]).map(x=>`<tr><td>${escapeHtml(x.product_name||x.raw_item_name||"—")}</td><td>${escapeHtml(x.size||"—")}</td><td>${escapeHtml(x.color||"—")}</td><td>${Number(x.quantity||0)}</td><td>${money(x.unit_price)}</td></tr>`).join("")||`<tr><td colspan="5">沒有商品明細</td></tr>`;
       $("fulfillmentShipmentHistory").innerHTML=(shipments||[]).length?(shipments||[]).map(x=>`<article class="fulfillment-history-item"><b>第 ${x.shipment_no} 次寄出</b><p>寄出：${fmtDate(x.shipped_at)}｜${escapeHtml(x.shipped_by_email||"—")}</p><p>退回：${fmtDate(x.returned_at)}｜${escapeHtml(x.returned_by_email||"—")}</p>${x.return_reason?`<p>退回原因：${escapeHtml(x.return_reason)}</p>`:""}${x.tracking_number?`<p>物流單號：${escapeHtml(x.tracking_number)}</p>`:""}</article>`).join(""):`<p class="hint">尚無寄出／退回紀錄。</p>`;
-      $("fulfillmentEventHistory").innerHTML=(events||[]).length?(events||[]).map(x=>`<article class="fulfillment-history-item"><b>${escapeHtml(x.event_type||"資料異動")}</b><p>${fmtDate(x.created_at)}｜${escapeHtml(x.actor_email||"未知使用者")}</p>${x.old_value?`<p>修改前：${escapeHtml(JSON.stringify(x.old_value))}</p>`:""}${x.new_value?`<p>修改後：${escapeHtml(JSON.stringify(x.new_value))}</p>`:""}${x.note?`<p>備註：${escapeHtml(x.note)}</p>`:""}</article>`).join(""):`<p class="hint">尚無操作履歷。</p>`;
+      $("fulfillmentEventHistory").innerHTML=renderFulfillmentEventHistory(events||[]);
       $("fulfillmentModal").hidden=false; document.body.classList.add("modal-open");
     } catch(err) { globalMessage("訂單明細載入失敗："+err.message,"error"); }
+  }
+  function renderFulfillmentEventHistory(events) {
+    if (!events.length) return `<p class="hint">尚無操作履歷。</p>`;
+    const fieldLabels = {order_date:"訂購日期",recipient:"收件人",seller_status:"賣貨便狀態",notes:"訂單備註",fulfillment_status:"出貨狀態"};
+    return events.map(event => {
+      const oldData = event.old_value && typeof event.old_value === "object" ? event.old_value : {};
+      const newData = event.new_value && typeof event.new_value === "object" ? event.new_value : {};
+      const isStatus = event.event_type === "狀態變更" && newData.fulfillment_status;
+      const changedFields = Object.keys(newData);
+      const summary = isStatus
+        ? `<span class="fulfillment-event-change">修改為 <strong>${escapeHtml(newData.fulfillment_status)}</strong></span>`
+        : changedFields.length
+          ? `<span class="fulfillment-event-change">更新 ${changedFields.map(key => escapeHtml(fieldLabels[key] || key)).join("、")}</span>`
+          : `<span class="fulfillment-event-change">${escapeHtml(event.event_type || "資料異動")}</span>`;
+      const icon = isStatus ? "↻" : "✎";
+      return `<article class="fulfillment-history-item fulfillment-event-item">
+        <span class="fulfillment-event-icon ${isStatus ? "is-status" : "is-edit"}" aria-hidden="true">${icon}</span>
+        <div class="fulfillment-event-content">
+          <div class="fulfillment-event-heading"><b>${escapeHtml(event.event_type || "資料異動")}</b>${summary}</div>
+          <p class="fulfillment-event-meta">${fmtDate(event.created_at)} <span>·</span> ${escapeHtml(event.actor_email || "未知使用者")}</p>
+          ${event.note ? `<p class="fulfillment-event-note">${escapeHtml(event.note)}</p>` : ""}
+        </div>
+      </article>`;
+    }).join("");
   }
   async function logOrderEvent(orderId,eventType,oldValue,newValue,note="") {
     const user=state.session?.user;
