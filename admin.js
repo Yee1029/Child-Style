@@ -7,6 +7,8 @@
   let orderSortDirection = "asc";
   let profitTrendChart = null;
   let fulfillmentOrders = [];
+  let fulfillmentSortKey = "order_date";
+  let fulfillmentSortDirection = "desc";
   let activeFulfillmentOrder = null;
   let idleLogoutTimer = null;
   const IDLE_LOGOUT_MS = 30 * 60 * 1000;
@@ -893,13 +895,49 @@
       renderFulfillmentOrders();
     } catch(err) { body.innerHTML=`<tr><td colspan="7">載入失敗：${escapeHtml(err.message)}</td></tr>`; }
   }
+  function fulfillmentSortValue(order, key) {
+    if (key === "order_id") return String(order.external_order_id || "");
+    if (key === "order_date" || key === "updated_at") {
+      const value = order[key];
+      if (!value) return null;
+      const time = new Date(value).getTime();
+      return Number.isFinite(time) ? time : null;
+    }
+    return order[key] ?? "";
+  }
+  function fulfillmentSortLabel(key) {
+    return key === "order_id" ? "訂單編號" : key === "order_date" ? "訂購日期" : "最後更新";
+  }
   function renderFulfillmentOrders() {
     const q=($("fulfillmentSearch").value||"").trim().toLowerCase(), f=$("fulfillmentStatusFilter").value;
     const rows=fulfillmentOrders.filter(o=>(f==="all"||o.fulfillment_status===f)&&`${o.external_order_id} ${o.recipient||""}`.toLowerCase().includes(q));
+    rows.sort((a,b)=>{
+      const av=fulfillmentSortValue(a,fulfillmentSortKey), bv=fulfillmentSortValue(b,fulfillmentSortKey);
+      // 缺少日期的訂單固定排在最後，不受升冪／降冪影響。
+      if (av === null || av === "") return bv === null || bv === "" ? 0 : 1;
+      if (bv === null || bv === "") return -1;
+      let result;
+      if (fulfillmentSortKey === "order_id") result=String(av).localeCompare(String(bv),"zh-TW",{numeric:true,sensitivity:"base"});
+      else result=av < bv ? -1 : av > bv ? 1 : 0;
+      return fulfillmentSortDirection === "asc" ? result : -result;
+    });
     $("fulfillmentTotal").textContent=fulfillmentOrders.length;
     $("fulfillmentPending").textContent=fulfillmentOrders.filter(o=>["待叫貨","已叫貨","部分到貨","已到貨","已包貨","待重新包貨"].includes(o.fulfillment_status)).length;
     $("fulfillmentReturned").textContent=fulfillmentOrders.filter(o=>o.fulfillment_status==="退貨待處理").length;
+    document.querySelectorAll("[data-fulfillment-sort]").forEach(button=>{
+      const active=button.dataset.fulfillmentSort===fulfillmentSortKey;
+      button.classList.toggle("is-sorted",active);
+      button.setAttribute("aria-sort",active?(fulfillmentSortDirection==="asc"?"ascending":"descending"):"none");
+      const arrow=button.querySelector(".sort-arrow");
+      if(arrow)arrow.textContent=active?(fulfillmentSortDirection==="asc"?"↑":"↓"):"↕";
+      button.title=active?`${fulfillmentSortLabel(fulfillmentSortKey)}：${fulfillmentSortDirection==="asc"?"由舊到新／小到大":"由新到舊／大到小"}`:`依${fulfillmentSortLabel(button.dataset.fulfillmentSort)}排序`;
+    });
     $("fulfillmentRows").innerHTML=rows.length?rows.map(o=>`<tr><td>${escapeHtml(o.external_order_id)}</td><td>${escapeHtml(o.order_date||"—")}</td><td>${escapeHtml(o.recipient||"—")}</td><td>${o.total_quantity}</td><td><span class="fulfillment-status">${escapeHtml(o.fulfillment_status||"待叫貨")}</span></td><td>${fmtDate(o.updated_at)}</td><td><button class="btn btn-outline btn-small" data-open-fulfillment="${escapeHtml(o.external_order_id)}">查看／編輯</button></td></tr>`).join(""):`<tr><td colspan="7">沒有符合的訂單。請先到「訂單統計」匯入賣貨便 Excel。</td></tr>`;
+  }
+  function toggleFulfillmentSort(key) {
+    if (fulfillmentSortKey === key) fulfillmentSortDirection = fulfillmentSortDirection === "asc" ? "desc" : "asc";
+    else { fulfillmentSortKey = key; fulfillmentSortDirection = key === "order_id" ? "asc" : "desc"; }
+    renderFulfillmentOrders();
   }
   async function openFulfillmentOrder(orderId) {
     try {
@@ -1014,6 +1052,7 @@
     $("fulfillmentSearch").addEventListener("input",renderFulfillmentOrders);
     $("fulfillmentStatusFilter").addEventListener("change",renderFulfillmentOrders);
     $("fulfillmentRows").addEventListener("click",e=>{const b=e.target.closest("[data-open-fulfillment]");if(b)openFulfillmentOrder(b.dataset.openFulfillment);});
+    $("fulfillmentTableHead").addEventListener("click",e=>{const b=e.target.closest("[data-fulfillment-sort]");if(b)toggleFulfillmentSort(b.dataset.fulfillmentSort);});
     $("closeFulfillmentModal").addEventListener("click",closeFulfillmentModal);
     $("fulfillmentModal").addEventListener("click",e=>{if(e.target===$("fulfillmentModal"))closeFulfillmentModal();});
     $("saveFulfillmentStatus").addEventListener("click",()=>changeFulfillmentStatus($("fulfillmentNewStatus").value,$("fulfillmentActionNote").value.trim()));

@@ -130,7 +130,7 @@
                 <button id="refreshFulfillmentBtn" type="button" class="btn btn-outline">重新整理</button>
               </div>
               <div class="fulfillment-stats"><article class="stat-card"><span>訂單總數</span><strong id="fulfillmentTotal">0</strong></article><article class="stat-card"><span>待處理</span><strong id="fulfillmentPending">0</strong></article><article class="stat-card"><span>退貨待處理</span><strong id="fulfillmentReturned">0</strong></article></div>
-              <div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead><tr><th>訂單編號</th><th>訂購日期</th><th>收件人</th><th>商品件數</th><th>管理狀態</th><th>最後更新</th><th>操作</th></tr></thead><tbody id="fulfillmentRows"><tr><td colspan="7">載入中…</td></tr></tbody></table></div>
+              <div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead id="fulfillmentTableHead"><tr><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="order_id">訂單編號 <span class="sort-arrow">↕</span></button></th><th><button type="button" class="fulfillment-sort-button is-sorted" data-fulfillment-sort="order_date" aria-sort="descending">訂購日期 <span class="sort-arrow">↓</span></button></th><th>收件人</th><th>商品件數</th><th>管理狀態</th><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="updated_at">最後更新 <span class="sort-arrow">↕</span></button></th><th>操作</th></tr></thead><tbody id="fulfillmentRows"><tr><td colspan="7">載入中…</td></tr></tbody></table></div>
               <p class="hint">訂單資料由訂單統計頁匯入的賣貨便 Excel 建立。重新匯入不會重設管理狀態、備註或歷史紀錄。</p>
             </section>
           </section>
