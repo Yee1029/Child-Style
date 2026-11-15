@@ -10,6 +10,7 @@
   let fulfillmentSortKey = "order_date";
   let fulfillmentSortDirection = "desc";
   let activeFulfillmentOrder = null;
+  let activeFulfillmentLines = [];
   let idleLogoutTimer = null;
   const IDLE_LOGOUT_MS = 30 * 60 * 1000;
   const ACCOUNT_STORAGE_KEY = "childStyleAdminAccounts";
@@ -897,6 +898,7 @@
   }
   function fulfillmentSortValue(order, key) {
     if (key === "order_id") return String(order.external_order_id || "");
+    if (key === "fulfillment_status") return FULFILLMENT_STATUSES.indexOf(order.fulfillment_status || "待叫貨");
     if (key === "order_date" || key === "updated_at") {
       const value = order[key];
       if (!value) return null;
@@ -906,7 +908,7 @@
     return order[key] ?? "";
   }
   function fulfillmentSortLabel(key) {
-    return key === "order_id" ? "訂單編號" : key === "order_date" ? "訂購日期" : "最後更新";
+    return key === "order_id" ? "訂單編號" : key === "order_date" ? "訂購日期" : key === "updated_at" ? "最後更新" : "管理狀態";
   }
   function renderFulfillmentOrders() {
     const q=($("fulfillmentSearch").value||"").trim().toLowerCase(), f=$("fulfillmentStatusFilter").value;
@@ -944,7 +946,7 @@
       const order=fulfillmentOrders.find(x=>x.external_order_id===orderId); if(!order) throw new Error("找不到訂單");
       activeFulfillmentOrder=order;
       const [{data:lines,error:le},{data:events,error:ee},{data:shipments,error:se}] = await Promise.all([
-        client().from("seller_order_lines").select("product_name,raw_item_name,size,color,quantity,unit_price").eq("external_order_id",orderId).order("id"),
+        client().from("seller_order_lines").select("id,product_name,raw_item_name,size,color,quantity,unit_price,arrived_quantity").eq("external_order_id",orderId).order("id"),
         client().from("seller_order_events").select("*").eq("external_order_id",orderId).order("created_at",{ascending:false}),
         client().from("seller_order_shipments").select("*").eq("external_order_id",orderId).order("shipment_no",{ascending:false})
       ]);
@@ -954,11 +956,56 @@
       $("fulfillmentNewStatus").value=order.fulfillment_status||"待叫貨";
       $("fulfillmentActionNote").value=""; $("fulfillmentOrderNotes").value=order.notes||"";
       $("returnActionPanel").hidden=order.fulfillment_status!=="退貨待處理";
-      $("fulfillmentLineRows").innerHTML=(lines||[]).map(x=>`<tr><td>${escapeHtml(x.product_name||x.raw_item_name||"—")}</td><td>${escapeHtml(x.size||"—")}</td><td>${escapeHtml(x.color||"—")}</td><td>${Number(x.quantity||0)}</td><td>${money(x.unit_price)}</td></tr>`).join("")||`<tr><td colspan="5">沒有商品明細</td></tr>`;
+      activeFulfillmentLines = lines || [];
+      $("fulfillmentLineRows").innerHTML=activeFulfillmentLines.map(x=>`<tr><td>${escapeHtml(x.product_name||x.raw_item_name||"—")}</td><td>${escapeHtml(x.size||"—")}</td><td>${escapeHtml(x.color||"—")}</td><td>${Number(x.quantity||0)}</td><td>${Number(x.arrived_quantity||0)} / ${Number(x.quantity||0)}</td><td>${money(x.unit_price)}</td></tr>`).join("")||`<tr><td colspan="6">沒有商品明細</td></tr>`;
+      renderArrivalProgressEditor();
       $("fulfillmentShipmentHistory").innerHTML=(shipments||[]).length?(shipments||[]).map(x=>`<article class="fulfillment-history-item"><b>第 ${x.shipment_no} 次寄出</b><p>寄出：${fmtDate(x.shipped_at)}｜${escapeHtml(x.shipped_by_email||"—")}</p><p>退回：${fmtDate(x.returned_at)}｜${escapeHtml(x.returned_by_email||"—")}</p>${x.return_reason?`<p>退回原因：${escapeHtml(x.return_reason)}</p>`:""}${x.tracking_number?`<p>物流單號：${escapeHtml(x.tracking_number)}</p>`:""}</article>`).join(""):`<p class="hint">尚無寄出／退回紀錄。</p>`;
       $("fulfillmentEventHistory").innerHTML=renderFulfillmentEventHistory(events||[]);
       $("fulfillmentModal").hidden=false; document.body.classList.add("modal-open");
     } catch(err) { globalMessage("訂單明細載入失敗："+err.message,"error"); }
+  }
+  function renderArrivalProgressEditor() {
+    const panel = $("arrivalProgressPanel");
+    if (!panel) return;
+    const show = $("fulfillmentNewStatus").value === "部分到貨";
+    panel.hidden = !show;
+    $("saveFulfillmentStatus").hidden = show;
+    if (!show) return;
+    const rows = activeFulfillmentLines || [];
+    $("arrivalProgressRows").innerHTML = rows.length ? rows.map(line => {
+      const qty = Math.max(0, Number(line.quantity || 0));
+      const arrived = Math.min(qty, Math.max(0, Number(line.arrived_quantity || 0)));
+      return `<div class="arrival-progress-row"><div class="arrival-progress-product"><strong>${escapeHtml(line.product_name || line.raw_item_name || "商品")}</strong><span>${escapeHtml([line.size,line.color].filter(Boolean).join("／") || "未標示規格")}</span></div><div class="arrival-progress-qty"><span>已到貨</span><input type="number" min="0" max="${qty}" step="1" value="${arrived}" data-arrived-line-id="${line.id}" aria-label="${escapeHtml(line.product_name || "商品")} 已到貨數量"><small>/ ${qty} 件</small></div></div>`;
+    }).join("") : `<p class="hint">此訂單沒有商品明細。</p>`;
+    const total = rows.reduce((sum,line)=>sum+Number(line.quantity||0),0);
+    const arrived = rows.reduce((sum,line)=>sum+Math.min(Number(line.quantity||0),Math.max(0,Number(line.arrived_quantity||0))),0);
+    $("arrivalProgressSummary").textContent = `目前已到貨 ${arrived} / ${total} 件；請輸入每個商品實際收到的數量。`;
+  }
+  function setArrivalQuantities(mode) {
+    document.querySelectorAll("[data-arrived-line-id]").forEach(input => {
+      const line = activeFulfillmentLines.find(x=>String(x.id)===input.dataset.arrivedLineId);
+      input.value = mode === "all" ? Number(line?.quantity||0) : 0;
+    });
+  }
+  async function saveArrivalProgress() {
+    const order = activeFulfillmentOrder;
+    if (!order) return;
+    const items = [...document.querySelectorAll("[data-arrived-line-id]")].map(input => ({
+      line_id: Number(input.dataset.arrivedLineId), arrived_quantity: Number(input.value)
+    }));
+    if (!items.length) { globalMessage("沒有可更新的商品明細。","error"); return; }
+    if (items.some(item=>!Number.isInteger(item.arrived_quantity) || item.arrived_quantity<0 || item.arrived_quantity>(activeFulfillmentLines.find(x=>Number(x.id)===item.line_id)?.quantity||0))) {
+      globalMessage("已到貨數量必須是 0 到訂購件數之間的整數。","error"); return;
+    }
+    try {
+      const {error}=await client().rpc("set_seller_order_arrival_progress",{
+        p_order_id:order.external_order_id,p_items:items,p_note:$("fulfillmentActionNote").value.trim()
+      });
+      if(error) throw error;
+      globalMessage("到貨數量已儲存，訂單狀態已自動更新。","success");
+      await loadFulfillmentOrders();
+      await openFulfillmentOrder(order.external_order_id);
+    } catch(err) { globalMessage("儲存到貨進度失敗："+err.message,"error"); }
   }
   function renderFulfillmentEventHistory(events) {
     if (!events.length) return `<p class="hint">尚無操作履歷。</p>`;
@@ -1079,6 +1126,10 @@
     $("fulfillmentTableHead").addEventListener("click",e=>{const b=e.target.closest("[data-fulfillment-sort]");if(b)toggleFulfillmentSort(b.dataset.fulfillmentSort);});
     $("closeFulfillmentModal").addEventListener("click",closeFulfillmentModal);
     $("fulfillmentModal").addEventListener("click",e=>{if(e.target===$("fulfillmentModal"))closeFulfillmentModal();});
+    $("fulfillmentNewStatus").addEventListener("change",renderArrivalProgressEditor);
+    $("arrivalMarkAll").addEventListener("click",()=>setArrivalQuantities("all"));
+    $("arrivalMarkNone").addEventListener("click",()=>setArrivalQuantities("none"));
+    $("saveArrivalProgress").addEventListener("click",saveArrivalProgress);
     $("saveFulfillmentStatus").addEventListener("click",()=>changeFulfillmentStatus($("fulfillmentNewStatus").value,$("fulfillmentActionNote").value.trim()));
     $("closeReturnedOrder").addEventListener("click",()=>changeFulfillmentStatus("退貨已結案","退貨後選擇結案"));
     $("reshipReturnedOrder").addEventListener("click",()=>changeFulfillmentStatus("待重新包貨","退貨後重新寄給原客人"));

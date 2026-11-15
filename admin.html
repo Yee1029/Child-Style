@@ -130,7 +130,7 @@
                 <button id="refreshFulfillmentBtn" type="button" class="btn btn-outline">重新整理</button>
               </div>
               <div class="fulfillment-stats"><article class="stat-card"><span>訂單總數</span><strong id="fulfillmentTotal">0</strong></article><article class="stat-card"><span>待處理</span><strong id="fulfillmentPending">0</strong></article><article class="stat-card"><span>退貨待處理</span><strong id="fulfillmentReturned">0</strong></article></div>
-              <div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead id="fulfillmentTableHead"><tr><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="order_id">訂單編號 <span class="sort-arrow">↕</span></button></th><th><button type="button" class="fulfillment-sort-button is-sorted" data-fulfillment-sort="order_date" aria-sort="descending">訂購日期 <span class="sort-arrow">↓</span></button></th><th>收件人</th><th>商品件數</th><th>管理狀態</th><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="updated_at">最後更新 <span class="sort-arrow">↕</span></button></th><th>操作</th></tr></thead><tbody id="fulfillmentRows"><tr><td colspan="7">載入中…</td></tr></tbody></table></div>
+              <div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead id="fulfillmentTableHead"><tr><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="order_id">訂單編號 <span class="sort-arrow">↕</span></button></th><th><button type="button" class="fulfillment-sort-button is-sorted" data-fulfillment-sort="order_date" aria-sort="descending">訂購日期 <span class="sort-arrow">↓</span></button></th><th>收件人</th><th>商品件數</th><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="fulfillment_status">管理狀態 <span class="sort-arrow">↕</span></button></th><th><button type="button" class="fulfillment-sort-button" data-fulfillment-sort="updated_at">最後更新 <span class="sort-arrow">↕</span></button></th><th>操作</th></tr></thead><tbody id="fulfillmentRows"><tr><td colspan="7">載入中…</td></tr></tbody></table></div>
               <p class="hint">訂單資料由訂單統計頁匯入的賣貨便 Excel 建立。重新匯入不會重設管理狀態、備註或歷史紀錄。</p>
             </section>
           </section>
@@ -274,7 +274,12 @@
             <button id="saveFulfillmentStatus" type="button" class="btn btn-dark">更新狀態</button>
           </div>
           <div id="returnActionPanel" class="return-action-panel" hidden><h3>退貨處理</h3><p>商品已退回後，可直接結案，或重新包貨寄給原客人。</p><div class="modal-actions"><button id="closeReturnedOrder" type="button" class="btn btn-outline">退貨結案</button><button id="reshipReturnedOrder" type="button" class="btn btn-dark">重新寄給原客人</button></div></div>
-          <h3>訂單商品明細</h3><div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead><tr><th>商品</th><th>尺寸</th><th>顏色</th><th>件數</th><th>單價</th></tr></thead><tbody id="fulfillmentLineRows"></tbody></table></div>
+          <h3>訂單商品明細</h3><div class="fulfillment-table-wrap"><table class="fulfillment-table"><thead><tr><th>商品</th><th>尺寸</th><th>顏色</th><th>訂購件數</th><th>已到貨／訂購</th><th>單價</th></tr></thead><tbody id="fulfillmentLineRows"></tbody></table></div>
+          <div id="arrivalProgressPanel" class="arrival-progress-panel" hidden>
+            <div class="arrival-progress-heading"><div><h3>逐項登記到貨數量</h3><p id="arrivalProgressSummary" class="hint">請輸入每個商品實際收到的數量。</p></div><div class="arrival-progress-tools"><button id="arrivalMarkAll" type="button" class="btn btn-outline btn-small">全部到貨</button><button id="arrivalMarkNone" type="button" class="btn btn-outline btn-small">全部未到</button></div></div>
+            <div id="arrivalProgressRows" class="arrival-progress-list"></div>
+            <div class="arrival-progress-footer"><span class="hint">儲存後系統會依到貨總數自動判斷「部分到貨」或「已到貨」。</span><button id="saveArrivalProgress" type="button" class="btn btn-dark">儲存到貨進度</button></div>
+          </div>
           <h3>寄出／退回紀錄</h3><div id="fulfillmentShipmentHistory" class="fulfillment-history"></div>
           <h3>完整操作履歷</h3><div id="fulfillmentEventHistory" class="fulfillment-history"></div>
           <label class="fulfillment-notes-label">訂單備註<textarea id="fulfillmentOrderNotes" rows="3" maxlength="2000" placeholder="訂單相關備註"></textarea></label>
@@ -291,6 +296,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
-  <script src="admin.js?v=4.5"></script>
+  <script src="admin.js?v=4.8"></script>
 </body>
 </html>
